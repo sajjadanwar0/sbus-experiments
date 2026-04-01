@@ -1,5 +1,1 @@
-run_id,system,agent_count,task_id,coord_tokens,work_tokens,cwr,steps_taken,success,commit_attempts,commit_conflicts,scr,wall_ms,model,sdk_version
-d61d0bf1-d363-43ef-9d62-d90c4a8bd67e,sbus,4,lh_001,697,3461,0.2014,10,0,13,0,0.0000,35941,gpt-4o-mini,rust-sbus-0.1.0
-87f51a3b-f2a9-437d-9945-6e282f74ba18,crewai,4,lh_001,119330,14390,8.2926,10,0,0,0,0.0000,68536,gpt-4o-mini,crewai-1.12.2
-87383b3c-ec5b-4763-b541-79cf86eea7e5,autogen,4,lh_001,12334,2341,5.2687,10,1,0,0,0.0000,62378,gpt-4o-mini,autogen-0.7.5
-f8c73556-7830-4736-800b-ed2eb3dadb7a,langgraph,4,lh_001,2252,619,3.6381,10,0,0,0,0.0000,25878,gpt-4o-mini,langgraph-1.1.x
+

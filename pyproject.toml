@@ -12,5 +12,6 @@ dependencies = [
     "openai>=2.30.0",
     "pandas>=3.0.1",
     "scipy>=1.17.1",
+    "scipy-stubs~=1.17.1",
     "tiktoken>=0.12.0",
 ]
