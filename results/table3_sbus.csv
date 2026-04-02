@@ -1,0 +1,11 @@
+run_id,system,agent_count,task_id,coord_tokens,work_tokens,cwr,steps_taken,success,commit_attempts,commit_conflicts,scr,retry_exhaustions,excluded,wall_ms,model,sdk_version
+041a9336-0389-4a3c-9da3-73dbbf5b8e97,sbus,4,lh_001,4450,17316,0.2570,50,1,63,0,0.0000,0,0,161952,gpt-4o-mini,rust-sbus-0.1.0
+1d1e441a-b2bd-4cc8-be69-066556f9dfc5,sbus,8,lh_001,2137,8700,0.2456,50,1,32,0,0.0000,0,0,92440,gpt-4o-mini,rust-sbus-0.1.0
+d60ddf53-f638-4188-94b5-448625b91962,sbus,4,lh_002,3329,12529,0.2657,50,0,50,0,0.0000,0,0,124307,gpt-4o-mini,rust-sbus-0.1.0
+a6df630c-b3fe-4590-adba-542f576425fc,sbus,8,lh_002,1536,6263,0.2452,50,0,26,0,0.0000,0,0,67349,gpt-4o-mini,rust-sbus-0.1.0
+7f45ebaf-7801-4ae5-ab94-e5dccd44b4d0,sbus,4,lh_003,3770,13933,0.2706,50,1,50,0,0.0000,0,0,131889,gpt-4o-mini,rust-sbus-0.1.0
+b7d457c5-6ea1-44f2-b0b0-9a02798360a6,sbus,8,lh_003,1889,7244,0.2608,50,1,26,0,0.0000,0,0,66017,gpt-4o-mini,rust-sbus-0.1.0
+b1db09eb-d229-4196-b0a2-24e9325b61f9,sbus,4,lh_004,4322,16148,0.2676,50,1,63,0,0.0000,0,0,155719,gpt-4o-mini,rust-sbus-0.1.0
+3ce79fdd-9ac0-4fc1-a161-ba902ebc49bd,sbus,8,lh_004,2057,8090,0.2543,50,1,32,0,0.0000,0,0,76858,gpt-4o-mini,rust-sbus-0.1.0
+a5195b0b-8b59-4777-a215-34ed8f148ed1,sbus,4,lh_005,3946,15489,0.2548,50,1,63,0,0.0000,0,0,146762,gpt-4o-mini,rust-sbus-0.1.0
+c6955f82-b24d-4d46-b53f-2c1a270753a0,sbus,8,lh_005,1930,7846,0.2460,50,1,32,0,0.0000,0,0,78779,gpt-4o-mini,rust-sbus-0.1.0

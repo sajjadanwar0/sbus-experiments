@@ -1,0 +1,11 @@
+run_id,system,agent_count,task_id,coord_tokens,work_tokens,cwr,steps_taken,success,commit_attempts,commit_conflicts,scr,retry_exhaustions,excluded,wall_ms,model,sdk_version
+2c26834c-8f55-43b9-8ca2-29faeb31879c,sbus,4,astropy__astropy-12907,1350,10680,0.1264,20,1,20,0,0.0000,0,0,50734,gpt-4o-mini,rust-sbus-0.1.0
+95cd7eb6-d3b1-4143-89fe-98fbe52abfc2,sbus,4,astropy__astropy-13033,1514,18321,0.0826,20,1,20,0,0.0000,0,0,52931,gpt-4o-mini,rust-sbus-0.1.0
+75f802d1-603f-4ada-9737-0d0dafe3174b,sbus,4,astropy__astropy-13236,1506,14025,0.1074,20,1,20,0,0.0000,0,0,51386,gpt-4o-mini,rust-sbus-0.1.0
+6d84eb60-2ac7-408d-a9a5-ded5814e5c25,sbus,4,astropy__astropy-13398,1204,29025,0.0415,20,1,20,0,0.0000,0,0,49632,gpt-4o-mini,rust-sbus-0.1.0
+effdf2a7-852e-4486-a429-40bd48296cf7,sbus,4,astropy__astropy-13453,1498,48401,0.0309,20,1,20,0,0.0000,0,0,49068,gpt-4o-mini,rust-sbus-0.1.0
+51fe97e5-8739-411b-aa73-33f5061fedf4,sbus,4,astropy__astropy-13579,1592,33288,0.0478,20,1,20,0,0.0000,0,0,55882,gpt-4o-mini,rust-sbus-0.1.0
+5a6d0f30-e472-4a17-838a-31d74de69e30,sbus,4,astropy__astropy-13977,1474,22563,0.0653,20,1,20,0,0.0000,0,0,44838,gpt-4o-mini,rust-sbus-0.1.0
+1a65cb5d-94f1-4f5c-a932-2664b60c3ca3,sbus,4,astropy__astropy-14096,1878,10218,0.1838,20,1,20,0,0.0000,0,0,61237,gpt-4o-mini,rust-sbus-0.1.0
+8f2397a3-e03b-4a4e-a01d-4b52765b4c19,sbus,4,astropy__astropy-14182,1485,14892,0.0997,20,1,20,0,0.0000,0,0,50813,gpt-4o-mini,rust-sbus-0.1.0
+7ef951f0-3b7f-49e5-9a01-547a65761fdc,sbus,4,astropy__astropy-14309,2849,33405,0.0853,20,1,20,0,0.0000,0,0,86091,gpt-4o-mini,rust-sbus-0.1.0

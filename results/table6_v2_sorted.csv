@@ -1,0 +1,4 @@
+condition,n_agents,injections,detected,corruptions,timeouts,detection_rate_pct,note
+v2_sorted,4,30,95,0,0,100.0,
+v2_sorted,8,30,227,0,0,100.0,
+v2_sorted,16,34,463,0,80,100.0,point est.
