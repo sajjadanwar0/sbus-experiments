@@ -36,7 +36,7 @@ Experiment design:
   - We record CrossShardStale rejections per commit attempt.
 
 Usage:
-    # S-Bus server must be running on :3000
+    # S-Bus server must be running on :7000
     cargo run --release &
     python arsi_overrejection.py
 
@@ -63,7 +63,7 @@ from statistics import mean, median, stdev
 
 import httpx
 
-BUS_URL = os.environ.get("SBUS_URL", "http://localhost:3000")
+BUS_URL = os.environ.get("SBUS_URL", "http://localhost:7000")
 OUT_DIR = Path(__file__).parent / "results"
 OUT_DIR.mkdir(exist_ok=True)
 

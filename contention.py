@@ -69,7 +69,7 @@ COOLDOWN_SECS = int(os.environ.get("SBUS_COOLDOWN", "5"))
 # ── S-Bus client ──────────────────────────────────────────────────────────────
 
 class SBusClient:
-    def __init__(self, url="http://localhost:3000"):
+    def __init__(self, url="http://localhost:7000"):
         self.base   = url
         self.client = httpx.Client(
             timeout=httpx.Timeout(15.0, connect=5.0)
@@ -483,7 +483,7 @@ def main():
                         help="Runs per (N, topology) — Table 5 only")
     parser.add_argument("--trials",    type=int, default=10,
                         help="Trials per agent count — Table 6 only")
-    parser.add_argument("--server",    type=str, default="http://localhost:3000")
+    parser.add_argument("--server",    type=str, default="http://localhost:7000")
     parser.add_argument("--mode",      type=str, default="scr",
                         choices=["scr", "cross-shard"])
     parser.add_argument("--condition", type=str, default="both",

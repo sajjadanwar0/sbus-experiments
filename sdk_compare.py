@@ -32,7 +32,7 @@ Usage:
     python sdk_compare.py --analyse-only --out results/real_sdk_results.csv
 
 Prerequisites:
-    cargo run                        # S-Bus server on :3000
+    cargo run                        # S-Bus server on :7000
     pip install openai anthropic httpx tiktoken scipy
 
     For Groq Llama:
@@ -384,7 +384,7 @@ CSV_HDR = (
 # ── S-Bus HTTP client ─────────────────────────────────────────────────────────
 
 class Bus:
-    def __init__(self, url: str = "http://localhost:3000"):
+    def __init__(self, url: str = "http://localhost:7000"):
         self.base = url
         self.c = httpx.Client(timeout=30)
 
@@ -1069,7 +1069,7 @@ def main():
     parser.add_argument("--tasks-path",  type=str,
                         default="datasets/long_horizon_tasks.json")
     parser.add_argument("--server",      type=str,
-                        default="http://localhost:3000")
+                        default="http://localhost:7000")
     parser.add_argument("--analyse-only", action="store_true")
 
     # Model selection

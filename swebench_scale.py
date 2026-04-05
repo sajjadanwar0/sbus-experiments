@@ -238,7 +238,7 @@ def mann_whitney_u(x: list[float], y: list[float]) -> tuple[float, float, float]
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", default="http://localhost:3000")
+    parser.add_argument("--base", default="http://localhost:7000")
     parser.add_argument("--n-agents", type=int, default=4)
     parser.add_argument("--runs-per-task", type=int, default=3)
     parser.add_argument("--steps", type=int, default=50)

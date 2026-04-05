@@ -39,7 +39,7 @@ from openai import OpenAI
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-BASE = "http://localhost:3000"
+BASE = "http://localhost:7000"
 MODEL = "gpt-4o-mini"
 MAX_TOKENS = 150
 

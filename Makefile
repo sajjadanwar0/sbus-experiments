@@ -11,7 +11,7 @@
 #   make smoke
 
 PYTHON     ?= python3
-SERVER     ?= http://localhost:3000
+SERVER     ?= http://localhost:7000
 AGENTS_LHP ?= 4 8
 STEPS_LHP  ?= 50
 TASKS      ?= 5

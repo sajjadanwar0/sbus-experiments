@@ -193,7 +193,7 @@ def llm_call(sys_msg: str, usr_msg: str, max_tok: int = 350) -> tuple[str, int, 
 # ── S-Bus HTTP client ─────────────────────────────────────────────────────────
 
 class Bus:
-    def __init__(self, url="http://localhost:3000"):
+    def __init__(self, url="http://localhost:7000"):
         self.base = url
         self.c = httpx.Client(timeout=30)
 
@@ -835,7 +835,7 @@ def main():
     p.add_argument("--success-steps", type=int, default=None)
     p.add_argument("--tasks", default="datasets/long_horizon_tasks.json")
     p.add_argument("--tasks-limit", type=int, default=None)
-    p.add_argument("--sbus-url", default="http://localhost:3000")
+    p.add_argument("--sbus-url", default="http://localhost:7000")
     p.add_argument("--out", default="results/real_sdk_results_v2.csv")
     p.add_argument("--analyse-only", action="store_true")
     p.add_argument("--ablation", action="store_true", help="Run ablation study (Table 11)")

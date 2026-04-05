@@ -44,7 +44,7 @@ import tiktoken
 from openai import OpenAI
 from scipy.stats import mannwhitneyu
 
-SBUS_URL  = "http://localhost:3000"
+SBUS_URL  = "http://localhost:7000"
 MODEL     = "gpt-4o-mini-2024-07-18"
 TEMP      = 0.2
 MAX_TOKS  = 300

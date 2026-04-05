@@ -29,7 +29,7 @@ from typing import Optional
 
 import httpx
 
-SBUS_URL = "http://localhost:3000"
+SBUS_URL = "http://localhost:7000"
 
 _CLIENT = httpx.Client(
     limits=httpx.Limits(max_connections=100, max_keepalive_connections=50),
@@ -448,7 +448,7 @@ def main():
                     default="results/cross_shard_validation.csv")
     ap.add_argument("--skip-baseline", action="store_true",
                     help="Skip v1_no_readset (saves time)")
-    ap.add_argument("--server",        type=str, default="http://localhost:3000")
+    ap.add_argument("--server",        type=str, default="http://localhost:7000")
     args = ap.parse_args()
 
     global SBUS_URL

@@ -19,7 +19,7 @@ Usage
 ─────
   # Start server first (with v19 engine):
   #   cd sbus && cargo run --release
-  python3 naive_deadlock_test.py [--base http://localhost:3000] [--trials 10]
+  python3 naive_deadlock_test.py [--base http://localhost:7000] [--trials 10]
 
 Output
 ──────
@@ -39,7 +39,7 @@ from typing import Literal
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-BASE = "http://localhost:3000"
+BASE = "http://localhost:7000"
 DEADLOCK_TIMEOUT = 5.0   # seconds — if a commit hangs this long, it's a deadlock
 SHARD_INIT_CONTENT = "initial content for shard"
 

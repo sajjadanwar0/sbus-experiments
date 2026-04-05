@@ -199,7 +199,7 @@ def llm(sys_msg: str, usr_msg: str,
 # ── S-Bus HTTP client ────────────────────────────────────────────────────────
 
 class Bus:
-    def __init__(self, url: str = "http://localhost:3000"):
+    def __init__(self, url: str = "http://localhost:7000"):
         self.base = url
         self.c = httpx.Client(timeout=30)
 
@@ -638,7 +638,7 @@ def main():
     parser.add_argument("--out",         type=str,  default="results/cwr_results.csv")
     parser.add_argument("--tasks-path",  type=str,
                         default="datasets/long_horizon_tasks.json")
-    parser.add_argument("--server",      type=str,  default="http://localhost:3000")
+    parser.add_argument("--server",      type=str,  default="http://localhost:7000")
     parser.add_argument("--model",       type=str,  default=MODEL)
     parser.add_argument("--analyse-only",action="store_true")
     parser.add_argument("--mode",        type=str,  default="cwr",
