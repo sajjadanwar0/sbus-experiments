@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 naive_deadlock_test.py — Experiment R: Re-demonstrate the deadlock result
 retracted in S-Bus v19.

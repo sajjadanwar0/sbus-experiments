@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 arsi_real_llm_test.py — Experiment A2 (extended): ARSI over-rejection rate
 measured with real LLM calls (not simulated latency).
@@ -127,10 +128,11 @@ class StaleInjector(threading.Thread):
         self.shards = shards
         self.interval = interval_s
         self.injections = 0
-        self._stop = threading.Event()
+        self._running = threading.Event()
+        self._running.set()  # starts True; cleared by stop()
 
     def run(self):
-        while not self._stop.is_set():
+        while self._running.is_set():
             key = random.choice(self.shards)
             try:
                 r = requests.get(f"{self.base}/shard/{key}", timeout=2)
@@ -148,7 +150,7 @@ class StaleInjector(threading.Thread):
             time.sleep(self.interval)
 
     def stop(self):
-        self._stop.set()
+        self._running.clear()
 
 
 # ── Single trial ─────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 swebench_scale.py — Experiment B2: SWE-bench scale-up to >=30 tasks
 across >=3 domains (astropy, django, sympy).
