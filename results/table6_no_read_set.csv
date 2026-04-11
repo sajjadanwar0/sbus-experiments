@@ -1,4 +1,0 @@
-condition,n_agents,injections,detected,corruptions,timeouts,detection_rate_pct,note
-no_read_set,4,30,83,20,0,80.6,
-no_read_set,8,32,229,24,0,90.5,
-no_read_set,16,40,482,59,0,89.1,point est.

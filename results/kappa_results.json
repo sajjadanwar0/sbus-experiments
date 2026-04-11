@@ -1,0 +1,104 @@
+{
+  "overall": {
+    "kappa": 1.0,
+    "ci_95_lo": 1.0,
+    "ci_95_hi": 1.0,
+    "percent_agreement": 100.0,
+    "p_o": 1.0,
+    "p_e": 0.625,
+    "n": 500,
+    "categories": [
+      "COORD",
+      "WORK"
+    ],
+    "confusion_matrix": {
+      "COORD": {
+        "COORD": 375,
+        "WORK": 0
+      },
+      "WORK": {
+        "COORD": 0,
+        "WORK": 125
+      }
+    },
+    "interpretation": "Almost perfect agreement (\u03ba \u2265 0.80)"
+  },
+  "per_system": {
+    "langgraph": {
+      "kappa": 0.0,
+      "ci_95_lo": 0.0,
+      "ci_95_hi": 0.0,
+      "percent_agreement": 100.0,
+      "p_o": 1.0,
+      "p_e": 1.0,
+      "n": 125,
+      "categories": [
+        "COORD"
+      ],
+      "confusion_matrix": {
+        "COORD": {
+          "COORD": 125
+        }
+      },
+      "interpretation": "Poor agreement (\u03ba = 0.000) \u2014 CF metric not publishable as primary result"
+    },
+    "sbus": {
+      "kappa": 0.0,
+      "ci_95_lo": 0.0,
+      "ci_95_hi": 0.0,
+      "percent_agreement": 100.0,
+      "p_o": 1.0,
+      "p_e": 1.0,
+      "n": 125,
+      "categories": [
+        "WORK"
+      ],
+      "confusion_matrix": {
+        "WORK": {
+          "WORK": 125
+        }
+      },
+      "interpretation": "Poor agreement (\u03ba = 0.000) \u2014 CF metric not publishable as primary result"
+    },
+    "crewai": {
+      "kappa": 0.0,
+      "ci_95_lo": 0.0,
+      "ci_95_hi": 0.0,
+      "percent_agreement": 100.0,
+      "p_o": 1.0,
+      "p_e": 1.0,
+      "n": 125,
+      "categories": [
+        "COORD"
+      ],
+      "confusion_matrix": {
+        "COORD": {
+          "COORD": 125
+        }
+      },
+      "interpretation": "Poor agreement (\u03ba = 0.000) \u2014 CF metric not publishable as primary result"
+    },
+    "autogen": {
+      "kappa": 0.0,
+      "ci_95_lo": 0.0,
+      "ci_95_hi": 0.0,
+      "percent_agreement": 100.0,
+      "p_o": 1.0,
+      "p_e": 1.0,
+      "n": 125,
+      "categories": [
+        "COORD"
+      ],
+      "confusion_matrix": {
+        "COORD": {
+          "COORD": 125
+        }
+      },
+      "interpretation": "Poor agreement (\u03ba = 0.000) \u2014 CF metric not publishable as primary result"
+    }
+  },
+  "publication_gate": "passed",
+  "annotation_file_a1": "annotation_sample_annotator1_FILLED.csv",
+  "annotation_file_a2": "annotation_sample_annotator2_FILLED.csv",
+  "auto_filled": false
+}

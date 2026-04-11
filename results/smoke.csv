@@ -1,2 +1,0 @@
-run_id,system,agent_count,task_id,coord_tokens,work_tokens,cwr,steps_taken,success,commit_attempts,commit_conflicts,scr,retry_exhaustions,excluded,wall_ms,model,sdk_version
-1d865be0-fb40-4517-b0e2-f7262a43013d,sbus,4,lh_001,619,3274,0.1891,10,0,13,0,0.0000,0,0,46474,gpt-4o-mini,rust-sbus-0.1.0

@@ -1,0 +1,25 @@
+task_id,run_idx,commits_succeeded,corrupted,confidence,reason,final_shard_0
+django__django-11019,0,2,0,0.0,"HTTP 400: {""type"":""error"",""error"":{""type"":""invalid_request_error"",""message"":""Your credit balance is ","[Agent2] ```python
+queryset = MyModel.objects.select_related('related_model').order_by('related_model__field_name')
+```"
+django__django-11019,1,2,0,0.0,"HTTP 400: {""type"":""error"",""error"":{""type"":""invalid_request_error"",""message"":""Your credit balance is ","[Agent2] ```python
+# Change this line
+queryset = MyModel.objects.all().order_by('related_model__field_name')
+
+# To this line
+queryset = MyModel.object"
+django__django-12286,0,2,0,0.0,"HTTP 400: {""type"":""error"",""error"":{""type"":""invalid_request_error"",""message"":""Your credit balance is ","[Agent1] ```python
+if user.role == 'admin' or user.has_permission('modify_admin_actions'):
+```"
+django__django-12286,1,2,0,0.0,"HTTP 400: {""type"":""error"",""error"":{""type"":""invalid_request_error"",""message"":""Your credit balance is ","[Agent2] ```python
+if user.is_admin or user.has_permission('admin_action'):
+```"
+django__django-13230,0,2,0,0.0,"HTTP 400: {""type"":""error"",""error"":{""type"":""invalid_request_error"",""message"":""Your credit balance is ","[Agent2] ```python
+# Before: Assume `get_migrations` returns migrations in a linear order.
+migrations = get_migrations()
+
+# Change: Implement a topolo"
+django__django-13230,1,2,0,0.0,"HTTP 400: {""type"":""error"",""error"":{""type"":""invalid_request_error"",""message"":""Your credit balance is ","[Agent2] ```python
+# In the migration squasher function, add a check to detect circular dependencies
+if migration in visited:
+    raise ValueError(f""C"
