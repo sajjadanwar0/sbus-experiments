@@ -1,0 +1,152 @@
+[
+  {
+    "task_id": "portfolio_rebalance",
+    "domain": "finance",
+    "description": "Four agents manage a shared investment portfolio that must be rebalanced. Agent 1 (Risk): updates risk exposure limits and VaR calculations. Agent 2 (Allocation): updates asset allocation percentages across equities, bonds, and cash. Agent 3 (Compliance): updates regulatory constraint flags and position limits. Agent 4 (Reporting): updates the executive summary narrative. All four agents share a single portfolio_state shard. Conflicts arise when Risk changes limits that invalidate Allocation's percentages, or when Compliance constrains positions that Allocation already committed to.",
+    "shards": ["portfolio_state"],
+    "conflict_scenario": "Agent 1 sets max_equity=60%. Agent 2 (reading stale v0) allocates equity=75%. These are mutually exclusive.",
+    "ground_truth_checks": [
+      "Equity allocation is within stated risk limits",
+      "Sum of all allocations equals 100%",
+      "No position exceeds compliance limits",
+      "Narrative is consistent with allocations"
+    ],
+    "n_agents": 4,
+    "expected_scr": 0.75
+  },
+  {
+    "task_id": "medical_record_update",
+    "domain": "healthcare",
+    "description": "Four agents collaboratively update a shared patient medical record. Agent 1 (Diagnosis): records primary and differential diagnoses. Agent 2 (Treatment): writes treatment plan and medication orders. Agent 3 (Nursing): documents nursing interventions and vital sign thresholds. Agent 4 (Discharge): prepares discharge planning notes. All agents share a single patient_record shard. Conflicts arise when Treatment prescribes a medication that Nursing's allergy list forbids, or when Discharge plans a date that Treatment's timeline contradicts.",
+    "shards": ["patient_record"],
+    "conflict_scenario": "Agent 1 diagnoses severe hypertension. Agent 2 (stale) prescribes NSAIDs which raise blood pressure. These are medically contradictory.",
+    "ground_truth_checks": [
+      "Medications are consistent with diagnoses",
+      "No prescribed medication appears in allergy/contraindication list",
+      "Discharge timeline is consistent with treatment duration",
+      "Nursing thresholds match treatment targets"
+    ],
+    "n_agents": 4,
+    "expected_scr": 0.80
+  },
+  {
+    "task_id": "api_schema_design",
+    "domain": "software_architecture",
+    "description": "Four agents design a shared REST API schema that must be internally consistent. Agent 1 (API): defines endpoint paths, HTTP methods, and response codes. Agent 2 (Database): defines the data model, table schemas, and foreign keys. Agent 3 (Auth): defines authentication requirements per endpoint and JWT claims. Agent 4 (Docs): writes the OpenAPI specification narrative. All agents share a single api_schema shard. Conflicts arise when API adds an endpoint that Database has no table for, or when Auth requires a claim that API does not return.",
+    "shards": ["api_schema"],
+    "conflict_scenario": "Agent 1 adds GET /users/{id}/orders endpoint. Agent 2 (stale) deletes the orders table. These are structurally inconsistent.",
+    "ground_truth_checks": [
+      "Every API endpoint has a corresponding database table",
+      "Auth requirements reference only fields that endpoints return",
+      "OpenAPI docs match defined endpoints",
+      "No undefined foreign key references"
+    ],
+    "n_agents": 4,
+    "expected_scr": 0.75
+  },
+  {
+    "task_id": "config_migration",
+    "domain": "devops",
+    "description": "Four agents collaborate to produce a Kubernetes deployment configuration that must be consistent across components. Agent 1 (App): sets container image versions, resource requests/limits, and environment variables. Agent 2 (Network): sets service ports, ingress rules, and load balancer configuration. Agent 3 (Storage): sets PersistentVolumeClaim specs and mount paths. Agent 4 (Security): sets RBAC roles, pod security contexts, and secret references. All agents share a single k8s_config shard. Conflicts arise when App defines an env var referencing a Secret that Security has not created, or when Network opens a port that App does not listen on.",
+    "shards": ["k8s_config"],
+    "conflict_scenario": "Agent 1 sets DATABASE_URL=secret/db-creds. Agent 3 (stale) does not mount the secret at that path. This would cause pod startup failure.",
+    "ground_truth_checks": [
+      "All referenced secrets exist in the security configuration",
+      "All mounted volumes are defined in PVC specs",
+      "Network ports match container port declarations",
+      "RBAC roles grant only what is needed"
+    ],
+    "n_agents": 4,
+    "expected_scr": 0.75
+  },
+  {
+    "task_id": "research_paper_outline",
+    "domain": "academic",
+    "description": "Four agents collaboratively draft a shared research paper outline that must be internally consistent. Agent 1 (Introduction): writes the problem statement, motivation, and contribution list. Agent 2 (Methods): writes the methodology section including experimental design and baselines. Agent 3 (Results): writes the results section referencing specific experiments and tables. Agent 4 (Discussion): writes the discussion and limitations sections. All agents share a single paper_outline shard. Conflicts arise when Results references an experiment that Methods has not defined, or when Discussion claims a result that Results does not show.",
+    "shards": ["paper_outline"],
+    "conflict_scenario": "Agent 1 lists Contribution C3 as 'formal proof for arbitrary N'. Agent 4 (stale) claims C3 is 'empirical scaling study'. These are contradictory contribution statements.",
+    "ground_truth_checks": [
+      "Contributions listed in Introduction match those validated in Results",
+      "Every experiment referenced in Results is defined in Methods",
+      "Limitations in Discussion match the scope stated in Introduction",
+      "No circular claims between sections"
+    ],
+    "n_agents": 4,
+    "expected_scr": 0.80
+  },
+  {
+    "task_id": "financial_report",
+    "domain": "finance",
+    "description": "Four agents produce a shared quarterly financial report that must be numerically consistent. Agent 1 (Revenue): records revenue by product line and region. Agent 2 (Expenses): records operating expenses, COGS, and depreciation. Agent 3 (Projections): writes forward guidance and analyst targets. Agent 4 (Narrative): writes the CEO letter and MD&A section. All agents share a single financial_report shard. Conflicts arise when Revenue records Q3 revenue as $12.4M but Narrative says $14.2M, or when Expenses' EBITDA differs from Projections' baseline.",
+    "shards": ["financial_report"],
+    "conflict_scenario": "Agent 1 sets Q3_revenue=12.4M. Agent 4 (stale) writes 'revenue grew to $14.2M'. These are numerically inconsistent.",
+    "ground_truth_checks": [
+      "All revenue figures are consistent across sections",
+      "EBITDA = Revenue - Expenses (within rounding)",
+      "Projections baseline matches reported actuals",
+      "Narrative percentages match computed deltas"
+    ],
+    "n_agents": 4,
+    "expected_scr": 0.80
+  },
+  {
+    "task_id": "incident_response",
+    "domain": "operations",
+    "description": "Four agents collaborate on a shared incident response runbook for a production outage. Agent 1 (Detection): documents monitoring alerts, thresholds, and escalation triggers. Agent 2 (Mitigation): documents immediate mitigation steps including rollback procedures. Agent 3 (RCA): documents root cause analysis steps and diagnostic commands. Agent 4 (Communication): writes stakeholder communication templates and status page updates. All agents share a single runbook shard. Conflicts arise when Mitigation's rollback target version differs from Detection's known-good version, or when Communication describes a resolution step that Mitigation has not defined.",
+    "shards": ["runbook"],
+    "conflict_scenario": "Agent 2 specifies rollback to v2.3.1 as mitigation. Agent 4 (stale) writes 'rolling back to v2.2.8' in the communication template. These are contradictory.",
+    "ground_truth_checks": [
+      "Rollback version is consistent across all sections",
+      "Communication templates reference only defined mitigation steps",
+      "RCA diagnostic commands are consistent with Detection alerts",
+      "Escalation thresholds match monitoring configuration"
+    ],
+    "n_agents": 4,
+    "expected_scr": 0.75
+  },
+  {
+    "task_id": "microservice_contract",
+    "domain": "software_architecture",
+    "description": "Four agents define a shared microservice contract between an order service and an inventory service. Agent 1 (Order Service): defines the events the order service publishes and the APIs it exposes. Agent 2 (Inventory Service): defines the events the inventory service consumes and the stock reservation API. Agent 3 (Schema): defines the shared Protobuf/JSON schemas for all events and API payloads. Agent 4 (SLA): defines latency SLOs, retry policies, and circuit breaker thresholds. All agents share a single service_contract shard. Conflicts arise when Order publishes an event that Schema has not defined, or when Inventory's retry policy exceeds Order's SLO.",
+    "shards": ["service_contract"],
+    "conflict_scenario": "Agent 1 publishes order.created with field customer_email. Agent 3 (stale) defines order.created schema without customer_email field. Contract is broken.",
+    "ground_truth_checks": [
+      "All published events have matching schema definitions",
+      "All consumed events are published by the counterpart service",
+      "Retry budgets do not exceed SLO thresholds",
+      "API payload fields match schema definitions"
+    ],
+    "n_agents": 4,
+    "expected_scr": 0.75
+  },
+  {
+    "task_id": "ml_pipeline_config",
+    "domain": "machine_learning",
+    "description": "Four agents collaboratively configure a shared ML training pipeline that must be internally consistent. Agent 1 (Data): specifies data preprocessing steps, feature engineering, and train/val/test splits. Agent 2 (Model): specifies model architecture, hyperparameters, and optimizer settings. Agent 3 (Training): specifies training loop, learning rate schedule, and early stopping criteria. Agent 4 (Evaluation): specifies evaluation metrics, thresholds for deployment, and A/B test design. All agents share a single pipeline_config shard. Conflicts arise when Data's feature dimension differs from Model's input layer, or when Training's epoch budget contradicts Evaluation's convergence criteria.",
+    "shards": ["pipeline_config"],
+    "conflict_scenario": "Agent 1 produces 128-dimensional feature vectors. Agent 2 (stale) defines input layer with 64 dimensions. Shape mismatch causes training failure.",
+    "ground_truth_checks": [
+      "Feature dimensions match model input layer dimensions",
+      "Train/val/test splits sum to 100%",
+      "Learning rate schedule is compatible with optimizer",
+      "Evaluation metrics are appropriate for the task type"
+    ],
+    "n_agents": 4,
+    "expected_scr": 0.80
+  },
+  {
+    "task_id": "legal_contract_draft",
+    "domain": "legal",
+    "description": "Four agents collaboratively draft a shared SaaS service agreement that must be legally consistent. Agent 1 (Terms): writes the service description, SLA commitments, and uptime guarantees. Agent 2 (Liability): writes the limitation of liability clauses and indemnification terms. Agent 3 (Data): writes the data processing agreement, retention policies, and GDPR compliance clauses. Agent 4 (Termination): writes the termination conditions, notice periods, and data deletion procedures. All agents share a single contract_draft shard. Conflicts arise when Terms commits to 99.9% uptime but Liability caps claims at $0 for downtime, or when Termination's data deletion timeline contradicts Data's retention policy.",
+    "shards": ["contract_draft"],
+    "conflict_scenario": "Agent 1 guarantees 99.99% uptime with service credits. Agent 2 (stale) caps all liability at $100 with no service credit provision. These are contradictory obligations.",
+    "ground_truth_checks": [
+      "Liability caps are consistent with SLA credit commitments",
+      "Data retention periods do not exceed GDPR maximum",
+      "Termination notice periods are consistent across sections",
+      "Uptime guarantees have corresponding remedy provisions"
+    ],
+    "n_agents": 4,
+    "expected_scr": 0.75
+  }
+]
