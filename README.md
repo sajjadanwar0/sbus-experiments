@@ -129,9 +129,9 @@ cargo run --release --bin redis-adapter &
 ### API keys
 
 ```bash
-export OPENAI_API_KEY=sk-...
-export ANTHROPIC_API_KEY=sk-ant-...   # optional
-export GROQ_API_KEY=gsk-...           # optional, for Exp.~T3-B Llama backbone
+export OPENAI_API_KEY=ex-...
+export ANTHROPIC_API_KEY=ex-ant-...
+export GROQ_API_KEY=gsk-...           
 ```
 
 ---
@@ -208,19 +208,6 @@ python3 exp_session_replication_dr9.py
 
 ---
 
-## Linting
-
-```bash
-pip install ruff
-ruff check --config ruff.toml *.py
-```
-
-The configuration tolerates research-code norms: relaxed line length,
-multi-statement lines, bare `except`, and conventionally ambiguous
-variable names.
-
----
-
 ## Data files
 
 Large result CSVs and JSONs (10 KB–2 MB each) are not included in this
@@ -238,7 +225,7 @@ the paper.
                  LLM State},
   institution = {Independent},
   year        = {2026},
-  note        = {arXiv preprint. Version 50.2.},
+  note        = {arXiv preprint. Version 1},
   url         = {https://arxiv.org/abs/...}
 }
 ```
@@ -246,7 +233,3 @@ the paper.
 ## License
 
 MIT. See `LICENSE`.
-
-## Contact
-
-Sajjad Khan — sajjadanwar0@gmail.com
