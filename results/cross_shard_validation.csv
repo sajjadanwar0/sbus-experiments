@@ -1,7 +1,0 @@
-mode,n_agents,n_trials,total_injections,total_cross_shard_detected,total_corruptions,total_retries,detection_rate,corruption_rate,mean_duration_s
-v2_with_readset,4,10,1341,956,0,966,0.7129,0.0,14.59
-v1_no_readset,4,10,313,0,193,258,0.0,0.6166,3.38
-v2_with_readset,8,10,2661,1868,0,1913,0.702,0.0,28.8
-v1_no_readset,8,10,664,0,374,681,0.0,0.5633,7.22
-v2_with_readset,16,10,5302,3749,0,3820,0.7071,0.0,57.15
-v1_no_readset,16,10,1341,0,766,1429,0.0,0.5712,14.5

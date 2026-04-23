@@ -1,80 +1,3 @@
-#!/usr/bin/env python3
-"""
-Exp. SJ-v4: Semantic Judge — Correct R_hidden Simulation
-==========================================================
-
-WHY SJ-v3 WAS NULL (post-hoc diagnosis):
-  The stale injection in SJ-v3 only wrote a stale version number into
-  the DeliveryLog. It did NOT change what the agent actually read.
-  The agent still called GET /shard and received fresh content.
-  So semantically, both conditions were identical — same prompt content,
-  same reasoning, same outputs. The null result was guaranteed by design.
-
-  Commit rate = 1.000 in both conditions confirmed this:
-  the stale DeliveryLog entry never triggered a rejection because
-  agents committed at the current version, not the stale one.
-
-THE FIX — Three changes from SJ-v3:
-
-  1. ACTUALLY FEED STALE CONTENT to the agent's prompt.
-     In the STALE condition: do NOT call GET /shard.
-     Instead give the agent a frozen snapshot from step 0.
-     This is the actual R_hidden scenario: agent reasons from
-     old cached context rather than fetching fresh state.
-
-  2. USE TASKS REQUIRING CUMULATIVE PRECISION.
-     Django bug repair is too well-specified — the fix direction
-     is clear regardless of intermediate state.
-     SJ-v4 uses tasks where intermediate state matters:
-       - SymPy algebraic derivation (step N depends on step N-1 result)
-       - Schema migration (migration state must track prior steps)
-       - Numerical accumulation (running totals, version numbers)
-
-  3. MEASURE CONTENT DIVERGENCE DIRECTLY.
-     Instead of only asking "is output corrupted?", also measure:
-       - Jaccard distance between fresh and stale agent outputs
-       - Semantic similarity (embedding cosine distance)
-       - Whether stale agent contradicts fresh agent's changes
-
-DESIGN:
-  Condition A (FRESH):  Agent reads current shard via GET before each step.
-                        Full fresh context in every prompt. Control.
-
-  Condition B (STALE):  Agent receives frozen snapshot from step 0.
-                        Never calls GET /shard after step 0.
-                        Simulates agent working from cached prompt context.
-                        ORI still active — structural conflicts blocked.
-                        But agent's REASONING is from stale state.
-
-  Both conditions: ORI active, commit at current version.
-  Judge: blind evaluation of final shard content.
-  Also measure: output divergence between conditions at each step.
-
-WHAT THIS PROVES:
-  If STALE produces more corruption: R_hidden causes semantic failures.
-  The mechanism is now correctly simulated: agent reasons from stale
-  content, produces stale-informed deltas, which may contradict
-  other agents' fresh-informed changes.
-
-TASKS SELECTED FOR MAXIMUM SENSITIVITY:
-  - sympy_solver:    algebraic derivation, step results build on each other
-  - sympy_matrix:    eigenvalue computation, precision required
-  - django_migration: migration graph, each step depends on prior state
-  - astropy_fits:    header accumulation, running state
-  - requests_session: session state evolution
-
-USAGE:
-  export OPENAI_API_KEY=sk-...
-  python3 exp_semantic_judge_v4.py \
-      --n-tasks 5 \
-      --n-runs 25 \
-      --n-steps 20 \
-      --injection-step 5 \
-      --output results/sj_v4_results.csv
-
-COST: ~$3.00 | TIME: 3-4 hours (use run_sjv4_parallel.py for parallelism)
-"""
-
 import csv
 import json
 import os
@@ -83,11 +6,12 @@ import time
 import uuid
 import argparse
 import socket
-import statistics
 from dataclasses import dataclass, asdict
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, ProxyHandler, build_opener
+from scipy import stats as scipy_stats
+from collections import defaultdict
 
 try:
     from openai import OpenAI
@@ -99,8 +23,6 @@ BACKBONE    = "gpt-4o-mini"
 JUDGE_MODEL = "gpt-4o-mini"
 
 _opener = build_opener(ProxyHandler({}))
-
-# ── Task definitions — selected for cumulative state sensitivity ──────────────
 
 SENSITIVE_TASKS = [
     {
@@ -195,9 +117,6 @@ SENSITIVE_TASKS = [
     },
 ]
 
-
-# ── HTTP helpers ──────────────────────────────────────────────────────────────
-
 def http_get(url, params=None):
     if params:
         url += "?" + urlencode(params)
@@ -237,8 +156,6 @@ def health_check():
     except Exception:
         return False
 
-
-# ── Judge ─────────────────────────────────────────────────────────────────────
 
 JUDGE_PROMPT = """\
 You are a strict technical evaluator. Judge ONLY semantic correctness.
@@ -299,19 +216,12 @@ def judge(task_desc: str, content: str, oai: OpenAI) -> tuple[str, str]:
     except Exception as e:
         return "INCOMPLETE", f"judge error: {e}"
 
-
-# ── Divergence measurement ────────────────────────────────────────────────────
-
 def jaccard_similarity(text1: str, text2: str) -> float:
-    """Word-level Jaccard similarity between two texts."""
     w1 = set(text1.lower().split())
     w2 = set(text2.lower().split())
     if not w1 and not w2:
         return 1.0
     return len(w1 & w2) / len(w1 | w2)
-
-
-# ── Condition runners ─────────────────────────────────────────────────────────
 
 def run_fresh(
     oai: OpenAI,
@@ -319,11 +229,6 @@ def run_fresh(
     n_agents: int,
     n_steps: int,
 ) -> tuple[str, int, int]:
-    """
-    Condition A: FRESH.
-    Every agent reads current shard content via HTTP before each step.
-    This is R_obs — ORI protected, fully fresh context.
-    """
     reset_bus()
     run_id = uuid.uuid4().hex[:8]
     shard  = f"shared_{run_id}"
@@ -342,7 +247,6 @@ def run_fresh(
 
     for step in range(n_steps):
         for agent in agents:
-            # FRESH: always read current state via HTTP
             status, data = http_get(f"{SBUS_URL}/shard/{shard}",
                                     {"agent_id": agent})
             if status != 200:
@@ -391,22 +295,6 @@ def run_stale(
     n_steps: int,
     injection_step: int,
 ) -> tuple[str, int, int, int]:
-    """
-    Condition B: STALE.
-    THE KEY FIX FROM SJ-v3:
-    After injection_step, the designated stale agent NO LONGER calls GET /shard.
-    Instead it reasons from a frozen snapshot of the shard content at step 0.
-    This correctly simulates R_hidden: the agent uses cached prompt context
-    rather than fetching fresh state.
-
-    The stale agent still commits at the current version (structural check passes)
-    but its REASONING is based on old content — so its delta may contradict
-    changes made by other agents since step 0.
-
-    ORI is active and correctly blocks structural conflicts.
-    The question is whether the SEMANTIC content becomes corrupted
-    despite structural protection.
-    """
     reset_bus()
     run_id = uuid.uuid4().hex[:8]
     shard  = f"shared_{run_id}"
@@ -420,19 +308,16 @@ def run_stale(
     for a in agents:
         http_post(f"{SBUS_URL}/session", {"agent_id": a, "session_ttl": 3600})
 
-    # Take stale snapshot at step 0 (initial content)
     _, snap = http_get(f"{SBUS_URL}/shard/{shard}", {"agent_id": "snapshot"})
     stale_content  = snap.get("content", task["initial_content"])
-    # stale_content is now FROZEN — it will never be updated for the stale agent
 
-    stale_agent    = agents[0]  # agent_0 is the one that goes stale
+    stale_agent    = agents[0]
     commits_ok     = 0
     commits_total  = 0
     n_stale_steps  = 0
 
     for step in range(n_steps):
         for agent in agents:
-            # All agents always get current version for commit
             status, data = http_get(f"{SBUS_URL}/shard/{shard}",
                                     {"agent_id": agent})
             if status != 200:
@@ -440,10 +325,6 @@ def run_stale(
             current_version = data.get("version", 0)
 
             if agent == stale_agent and step >= injection_step:
-                # ── THE FIX: use FROZEN stale content in prompt ───────────────
-                # Do NOT use data["content"] (which is fresh).
-                # Use stale_content (frozen at step 0).
-                # This is R_hidden: agent reasons from cached old context.
                 context = (
                     f"{stale_content}\n\n"
                     f"[Agent note: working from prior context, "
@@ -451,7 +332,6 @@ def run_stale(
                 )
                 n_stale_steps += 1
             else:
-                # Fresh agents use current content normally
                 context = data.get("content", "")
 
             try:
@@ -472,9 +352,6 @@ def run_stale(
             except Exception as e:
                 delta = f"[{agent} s{step+1}] error: {e}"
 
-            # Commit at current version — structural check passes
-            # (stale agent commits correctly structurally,
-            #  but its content may be semantically stale)
             commit_status, _ = http_post(f"{SBUS_URL}/commit/v2", {
                 "key":              shard,
                 "expected_version": current_version,
@@ -490,9 +367,6 @@ def run_stale(
     _, final = http_get(f"{SBUS_URL}/shard/{shard}", {"agent_id": "judge"})
     return final.get("content", ""), commits_ok, commits_total, n_stale_steps
 
-
-# ── Result dataclass ──────────────────────────────────────────────────────────
-
 @dataclass
 class SJv4Result:
     run_id:           str
@@ -503,16 +377,13 @@ class SJv4Result:
     commits_ok:       int
     commits_total:    int
     commit_rate:      float
-    n_stale_steps:    int   # how many steps used stale context (0 for fresh)
+    n_stale_steps:    int
     verdict:          str
     is_corrupted:     bool
     is_complete:      bool
     judge_reason:     str
     surviving_content: str
     wall_secs:        float
-
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Exp. SJ-v4: Correct R_hidden simulation")
@@ -527,7 +398,6 @@ def main():
     parser.add_argument("--output",         default="results/sj_v4_results.csv")
     args = parser.parse_args()
 
-    # ── Checks ────────────────────────────────────────────────────────────────
     if not os.environ.get("OPENAI_API_KEY"):
         print("ERROR: set OPENAI_API_KEY"); sys.exit(1)
 
@@ -538,7 +408,6 @@ def main():
 
     oai = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-    # Load task list — from JSON file if provided, else built-in SENSITIVE_TASKS
     if args.tasks_file and os.path.exists(args.tasks_file):
         with open(args.tasks_file) as f:
             all_tasks = json.load(f)
@@ -548,7 +417,6 @@ def main():
         if args.tasks_file:
             print(f"WARNING: tasks file not found: {args.tasks_file}, using built-in tasks")
 
-    # Apply offset for parallel runner (SJV4_TASK_OFFSET env var)
     task_offset = int(os.environ.get("SJV4_TASK_OFFSET", "0"))
     tasks = all_tasks[task_offset:task_offset + args.n_tasks]
 
@@ -657,13 +525,10 @@ def main():
     out_f.close()
     _print_summary(counts)
     _run_stats(results)
-    _generate_paper_text(counts, args)
     print(f"\nResults: {args.output}")
 
 
 def _print_summary(counts: dict) -> None:
-    from scipy import stats as scipy_stats
-
     print("\n" + "=" * 65)
     print("EXP. SJ-v4 RESULTS")
     print("=" * 65)
@@ -692,26 +557,20 @@ def _print_summary(counts: dict) -> None:
                 [[k1,n1-k1],[k2,n2-k2]], alternative="less")
             print(f"  Fisher's exact (one-sided):     p = {p:.4f}")
             if p < 0.05:
-                print("  ✅ SIGNIFICANT at α=0.05")
+                print("  SIGNIFICANT at α=0.05")
             elif p < 0.10:
-                print("  ⚠️  MARGINAL")
+                print("    MARGINAL")
             else:
-                print("  ❌ NOT SIGNIFICANT")
+                print("   NOT SIGNIFICANT")
     except ImportError:
         print("  (install scipy for p-value)")
 
 
 def _run_stats(results: list) -> None:
-    try:
-        from scipy import stats as scipy_stats
-    except ImportError:
-        return
-
     print("\n" + "=" * 65)
     print("PER-TASK BREAKDOWN")
     print("=" * 65)
 
-    from collections import defaultdict
     task_counts = defaultdict(lambda: defaultdict(
         lambda: {"corrupted":0,"total":0}))
     for r in results:
@@ -728,44 +587,6 @@ def _run_stats(results: list) -> None:
         ps = s["corrupted"]/max(1,s["total"])
         print(f"  {task[-28:]:<30} {pf*100:>7.1f}% {ps*100:>7.1f}% "
               f"{(ps-pf)*100:>+7.1f}pp")
-
-
-def _generate_paper_text(counts: dict, args) -> None:
-    a = counts["structural_fresh"]
-    b = counts["structural_stale"]
-    p_a = a["corrupted"] / max(1, a["total"])
-    p_b = b["corrupted"] / max(1, b["total"])
-    diff = p_b - p_a
-
-    print("\n" + "=" * 65)
-    print("PAPER TEXT — §9.19 Exp. SJ-v4")
-    print("=" * 65)
-    print()
-    print(f"\\subsection{{Exp.~SJ-v4: Semantic Judge (Correct $R_{{\\text{{hidden}}}}$ Simulation)}}")
-    print(f"\\label{{sec:sjv4}}")
-    print()
-    print(f"\\paragraph{{Design improvement over SJ-v3.}}")
-    print(f"Exp.~SJ-v3 (§\\ref{{sec:sjv3}}) produced a null result because")
-    print(f"the stale injection only modified the DeliveryLog version record,")
-    print(f"not the agent's prompt content. Both conditions received identical")
-    print(f"information, making the null result mechanistically guaranteed.")
-    print(f"SJ-v4 corrects this: after step~{args.injection_step}, the stale agent")
-    print(f"no longer calls \\texttt{{GET /shard}}. Instead it reasons from a frozen")
-    print(f"snapshot of the shard content at step~0, correctly simulating")
-    print(f"$R_{{\\text{{hidden}}}}$: an agent using cached prompt context rather than")
-    print(f"fetching fresh state. We also selected tasks requiring cumulative")
-    print(f"precision (SymPy algebraic derivation, Django migration graph,")
-    print(f"Astropy FITS header accumulation) where stale context produces")
-    print(f"directionally wrong outputs.")
-    print()
-    print(f"\\paragraph{{Results.}}")
-    print(f"Fresh ($R_{{\\text{{obs}}}}$): ${p_a*100:.1f}\\%$~semantic corruption")
-    print(f"({a['corrupted']}/{a['total']}~runs).")
-    print(f"Stale ($R_{{\\text{{hidden}}}}$ simulated): ${p_b*100:.1f}\\%$~corruption")
-    print(f"({b['corrupted']}/{b['total']}~runs).")
-    print(f"Lift: ${diff*100:+.1f}$\\,pp.")
-    print(f"[INSERT Fisher's exact p-value from script output]")
-
 
 if __name__ == "__main__":
     main()

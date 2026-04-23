@@ -43,12 +43,8 @@ USAGE:
   # {"total_completions": N, "hidden_reads_promoted": M, ...}
 """
 
-import re
-import json
 import threading
-import time
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError
 
 
 class _CompletionsProxy:
@@ -215,12 +211,12 @@ class PhiddenWrapper:
 
     def print_stats(self):
         s = self.stats()
-        print(f"\n=== PhiddenWrapper Stats ===")
+        print("\n=== PhiddenWrapper Stats ===")
         print(f"  Completions intercepted : {s['total_completions']}")
         print(f"  Hidden reads promoted   : {s['hidden_reads_promoted']}")
         print(f"  Promotion rate          : {s['promotion_rate']*100:.1f}%")
         if s["by_key"]:
-            print(f"  By shard key:")
+            print("  By shard key:")
             for k, v in sorted(s["by_key"].items()):
                 print(f"    {k}: {v}")
         print()

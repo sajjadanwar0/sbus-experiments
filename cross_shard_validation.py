@@ -1,19 +1,3 @@
-"""
-cross_shard_validation.py
-─────────────────────────
-Validates ACP cross-shard phantom-read prevention.
-
-No LLM calls needed — this experiment tests the Rust middleware directly.
-Agents produce synthetic deltas; the injector advances a dependency shard
-between agent reads and commits to trigger CrossShardStale.
-
-Usage:
-    python cross_shard_validation.py
-    python cross_shard_validation.py --agents 4 8 16 --trials 10
-    python cross_shard_validation.py --agents 16 --trials 3 --steps 5
-    python cross_shard_validation.py --skip-baseline --out results/arsi_only.csv
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -35,9 +19,6 @@ _CLIENT = httpx.Client(
     limits=httpx.Limits(max_connections=100, max_keepalive_connections=50),
     timeout=httpx.Timeout(30.0, connect=5.0),
 )
-
-
-# ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 def create_shard(key: str, content: str, goal_tag: str) -> dict:
     r = _CLIENT.post(f"{SBUS_URL}/shard",
@@ -73,9 +54,6 @@ def commit_original(key: str, expected_version: int, delta: str,
                            "delta": delta, "agent_id": agent_id})
     return r.status_code == 200, r.json()
 
-
-# ── Data structures ───────────────────────────────────────────────────────────
-
 @dataclass
 class TrialResult:
     trial_id:             int
@@ -85,7 +63,7 @@ class TrialResult:
     corruptions:          int
     retries:              int
     duration_s:           float
-    success:              bool  # True if zero corruptions
+    success:              bool
 
 
 @dataclass
@@ -102,15 +80,7 @@ class ExperimentResult:
     mean_duration_s:            float
 
 
-# ── Injector ──────────────────────────────────────────────────────────────────
-
 class Injector:
-    """
-    Advances db_schema shard concurrently to trigger phantom-read scenarios.
-    Uses /commit (no read_set) to bypass ARSI — it is the dependency, not
-    the target, and doesn't declare its own read_set.
-    """
-
     def __init__(self, db_schema_key: str, delay_s: float = 0.08):
         self.key   = db_schema_key
         self.delay = delay_s
@@ -150,9 +120,6 @@ class Injector:
             except Exception:
                 pass
 
-
-# ── Agent logic ───────────────────────────────────────────────────────────────
-
 @dataclass
 class AgentStats:
     commits:           int = 0
@@ -171,10 +138,6 @@ def _agent_with_readset(
     stats: AgentStats,
     lock: threading.Lock,
 ):
-    """
-    Agent that declares cross-shard read_set (/commit/v2).
-    Expected result: zero corruptions.
-    """
     for step in range(steps):
         for attempt in range(6):
             try:
@@ -185,8 +148,6 @@ def _agent_with_readset(
                 db_ver, api_ver, dep_ver = (
                     db["version"], api["version"], dep["version"]
                 )
-
-                # Simulate processing latency — gives injector time to fire
                 time.sleep(0.10 + random.uniform(0, 0.05))
 
                 delta = (
@@ -194,10 +155,6 @@ def _agent_with_readset(
                     f"refs db@v{db_ver} api@v{api_ver}"
                 )
 
-                # Snapshot db version immediately before commit call.
-                # If injector advanced db between our read and now, the
-                # server MUST reject via CrossShardStale. A 200 despite
-                # pre != db_ver is a real protocol failure.
                 pre_commit_db_ver = read_shard(db_key)["version"]
 
                 ok, resp = commit_v2(
@@ -239,10 +196,6 @@ def _agent_without_readset(
     stats: AgentStats,
     lock: threading.Lock,
 ):
-    """
-    Baseline agent using /commit (no read_set).
-    Expected result: corruptions occur (56-62% rate).
-    """
     for step in range(steps):
         for attempt in range(6):
             try:
@@ -276,9 +229,6 @@ def _agent_without_readset(
             except Exception:
                 stats.retries += 1
                 time.sleep(0.1)
-
-
-# ── Trial runner ──────────────────────────────────────────────────────────────
 
 def run_trial(
     trial_id: int,
@@ -330,9 +280,6 @@ def run_trial(
         duration_s=round(dur, 2),
         success=(stats.corruptions == 0),
     )
-
-
-# ── Experiment runner ─────────────────────────────────────────────────────────
 
 def run_experiment(
     n_agents: int,
@@ -386,9 +333,6 @@ def run_experiment(
         mean_duration_s=round(mean_dur, 2),
     )
 
-
-# ── CSV output ────────────────────────────────────────────────────────────────
-
 def write_csv(results: list[ExperimentResult], path: str):
     fields = [
         "mode", "n_agents", "n_trials", "total_injections",
@@ -430,9 +374,6 @@ def print_paper_table(results: list[ExperimentResult]):
         )
     print("-"*70)
     print("v2_with_readset corruptions MUST be 0. Non-zero for v1 is expected.")
-
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     ap = argparse.ArgumentParser(

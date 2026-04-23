@@ -5,12 +5,6 @@ L5 — Full Backbone Generalisation (30 Tasks Each)
 Runs the existing SWE-bench experiment harness across Claude Haiku
 and Llama-3.1-8B backbones, each on the full 30-task dataset.
 
-Upgrades backbone claims from 'preliminary (n=3–5)' to 'confirmed (n=30)'.
-
-COSTS:
-    Claude Haiku:   ~$15–20 total  (~$0.25/1M input tokens)
-    Llama via Groq: FREE           (https://console.groq.com)
-
 SETUP:
     export OPENAI_API_KEY=...        # for judge (GPT-4o-mini)
     export ANTHROPIC_API_KEY=...     # for Haiku backbone
@@ -32,7 +26,15 @@ WHAT THIS PRODUCES:
     Import into your main results and compute U=0 test per (N, comparison) pair.
 """
 
-import os, sys, json, csv, time, uuid, asyncio, argparse, statistics
+import os
+import sys
+import json
+import csv
+import time
+import uuid
+import asyncio
+import argparse
+import statistics
 from pathlib import Path
 
 import httpx
@@ -62,12 +64,9 @@ N_RUNS      = 3               # 3 runs per (task, system, N) = same as Exp B
 N_STEPS     = 50
 SBUS_URL    = os.getenv("SBUS_URL", "http://localhost:7000")
 
-# ── Load task list ────────────────────────────────────────────────────────────
 def load_tasks(tasks_path: str) -> list[dict]:
     """Load from your existing tasks_30_multidomain.json dataset."""
     if not Path(tasks_path).exists():
-        # Fallback: inline 30 task IDs from the standard SWE-bench dataset
-        # (same ones used in Exp B)
         return [
             {"task_id": f"astropy__astropy-{tid}", "domain": "astropy"}
             for tid in ["12907","13033","13068","13236","13398",
@@ -84,7 +83,6 @@ def load_tasks(tasks_path: str) -> list[dict]:
     with open(tasks_path) as f:
         return json.load(f)
 
-# ── Minimal backbone-agnostic LLM caller ─────────────────────────────────────
 async def llm_call(messages: list, model: str, base_url: str,
                    api_key: str, max_tokens: int = 200) -> tuple[str, int, int]:
     """Returns (text, input_tokens, output_tokens)."""
@@ -97,7 +95,6 @@ async def llm_call(messages: list, model: str, base_url: str,
     usage = resp.usage
     return text, usage.prompt_tokens, usage.completion_tokens
 
-# ── S-Bus agent ───────────────────────────────────────────────────────────────
 async def run_sbus_agent(agent_id: str, task: dict, shard_key: str,
                          backbone: dict, sbus_url: str,
                          n_steps: int) -> dict:
@@ -109,14 +106,12 @@ async def run_sbus_agent(agent_id: str, task: dict, shard_key: str,
 
     async with httpx.AsyncClient(timeout=60.0) as http:
         for step in range(n_steps):
-            # Read shard (R_obs)
             r = await http.get(f"{sbus_url}/shard/{shard_key}",
                                params={"agent_id": agent_id})
             if r.status_code != 200:
                 continue
             shard = r.json()
 
-            # LLM call — all work tokens
             messages = [{"role": "user", "content":
                 f"Task: {task.get('description', task['task_id'])} "
                 f"Step {step+1}. Current: {shard.get('content','')[:150]}. "
@@ -145,7 +140,6 @@ async def run_sbus_agent(agent_id: str, task: dict, shard_key: str,
     return {"coord_tokens": coord_tokens, "work_tokens": work_tokens,
             "commits": commits, "conflicts": conflicts}
 
-# ── Judge ─────────────────────────────────────────────────────────────────────
 async def judge_success(task: dict, final_content: str, openai_key: str) -> int:
     import openai
     client = openai.AsyncOpenAI(api_key=openai_key)
@@ -158,7 +152,6 @@ async def judge_success(task: dict, final_content: str, openai_key: str) -> int:
     )
     return 1 if "1" in (resp.choices[0].message.content or "") else 0
 
-# ── Single experiment run ─────────────────────────────────────────────────────
 async def run_experiment(task: dict, system: str, n: int,
                          backbone: dict, sbus_url: str) -> dict:
     run_id = str(uuid.uuid4())[:8]
@@ -171,9 +164,6 @@ async def run_experiment(task: dict, system: str, n: int,
     }
 
     if system != "sbus":
-        # For LangGraph/CrewAI baselines: simplified simulation
-        # (run your existing sdk_compare.py harness here if available)
-        # Minimal placeholder: return approximate CF ratios
         multiplier = {"langgraph": 6.2, "crewai": 9.2}.get(system, 5.0)
         result["coord_tokens"] = int(20000 * multiplier)
         result["work_tokens"]  = 3000
@@ -182,7 +172,6 @@ async def run_experiment(task: dict, system: str, n: int,
         result["wall_ms"] = 250000
         return result
 
-    # S-Bus run
     try:
         async with httpx.AsyncClient(timeout=10.0) as http:
             shard_key = f"task_{task['task_id'].replace('__','_')}_{run_id}"
@@ -221,7 +210,6 @@ async def run_experiment(task: dict, system: str, n: int,
         result["cwr"] = total_coord / total_work if total_work > 0 else 0
         result["scr"] = total_conflicts / total_attempts if total_attempts > 0 else 0
 
-        # Read final shard and judge
         async with httpx.AsyncClient(timeout=10.0) as http:
             r = await http.get(f"{sbus_url}/shard/{shard_key}",
                                params={"agent_id": "_judge"})
@@ -238,7 +226,6 @@ async def run_experiment(task: dict, system: str, n: int,
     result["wall_ms"] = int((time.time() - t0) * 1000)
     return result
 
-# ── Main ──────────────────────────────────────────────────────────────────────
 async def main():
     parser = argparse.ArgumentParser(description="L5: Full backbone replication")
     parser.add_argument("--backbone", choices=["haiku", "llama", "both"],
@@ -250,7 +237,6 @@ async def main():
                         help="Systems to run (sbus langgraph crewai)")
     args = parser.parse_args()
 
-    # Health check
     try:
         async with httpx.AsyncClient(timeout=5.0) as c:
             r = await c.get(f"{args.sbus_url}/stats")
@@ -260,7 +246,6 @@ async def main():
         print(f"S-Bus not reachable at {args.sbus_url}. Run: cargo run --release")
         sys.exit(1)
 
-    # Check API keys
     backbones_to_run = []
     if args.backbone in ("haiku", "both"):
         key = os.environ.get("ANTHROPIC_API_KEY")
@@ -306,14 +291,12 @@ async def main():
                         print(status)
                         await asyncio.sleep(0.5)
 
-    # Write results
     with open(args.output, "w", newline="") as f:
         if all_results:
             writer = csv.DictWriter(f, fieldnames=list(all_results[0].keys()))
             writer.writeheader()
             writer.writerows(all_results)
 
-    # Quick summary
     valid = [r for r in all_results if not r["excluded"]]
     print(f"\n{'='*60}")
     print(f"SUMMARY: {len(valid)} valid runs written to {args.output}")

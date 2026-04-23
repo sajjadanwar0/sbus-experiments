@@ -25,7 +25,14 @@ Analyse existing results:
     python3 sdk_compare_v2.py --analyse-only --out results/real_sdk_results_v2.csv
 """
 
-import argparse, json, logging, operator, os, sys, time, uuid
+import argparse
+import json
+import logging
+import operator
+import os
+import sys
+import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, TypedDict
@@ -39,7 +46,8 @@ for pkg in ["httpx", "tiktoken", "openai"]:
         print(f"Missing: pip install {pkg}")
         sys.exit(1)
 
-import httpx, tiktoken
+import httpx
+import tiktoken
 from openai import OpenAI
 
 _ENC = tiktoken.encoding_for_model("gpt-4o")
@@ -432,7 +440,7 @@ def run_cross_shard_v2(bus: Bus, n_agents: int, n_trials: int = 10,
                     {"key": api_key_s, "version": api_shard["version"]},
                 ]
 
-                t_commit_start = time.time()
+                time.time()
                 resp = bus.commit_v2(dep_key, dep_shard["version"], text, agent, read_set)
                 t_commit_end = time.time()
 
@@ -771,8 +779,8 @@ def analyse(csv_path: Path) -> None:
     print("-" * 60)
 
     for ac in sorted(df["agent_count"].unique()):
-        for sys in ["sbus", "crewai", "autogen", "langgraph"]:
-            sub = df[(df["system"] == sys) & (df["agent_count"] == ac)]["cwr"].tolist()
+        for sysname in ["sbus", "crewai", "autogen", "langgraph"]:
+            sub = df[(df["system"] == sysname) & (df["agent_count"] == ac)]["cwr"].tolist()
             if not sub:
                 continue
             n = len(sub)
@@ -787,28 +795,28 @@ def analyse(csv_path: Path) -> None:
                 hw = ci95(sub)
                 ci_str = f"±{hw:.3f}"
                 method = f"t({n-1})" if n < 30 else "z"
-            print(f"{sys:<16} {ac:>4} {mean:>10.3f} {ci_str:>14} {n:>4}  {method}")
+            print(f"{sysname:<16} {ac:>4} {mean:>10.3f} {ci_str:>14} {n:>4}  {method}")
 
     print(f"\n{'='*70}")
     print("Mann-Whitney U: S-Bus CWR < each baseline (one-sided)")
     print(f"{'='*70}")
     sbus_cwr = df[df["system"] == "sbus"]["cwr"]
-    for sys in ["crewai", "autogen", "langgraph"]:
-        base = df[df["system"] == sys]["cwr"]
+    for sysname in ["crewai", "autogen", "langgraph"]:
+        base = df[df["system"] == sysname]["cwr"]
         if len(base) < 2 or len(sbus_cwr) < 2:
-            print(f"  sbus < {sys:<12}: insufficient data")
+            print(f"  sbus < {sysname:<12}: insufficient data")
             continue
         u, p = stats.mannwhitneyu(sbus_cwr, base, alternative="less")
         r = 1 - (2 * u) / (len(sbus_cwr) * len(base))
         sig = "***" if p < 0.001 else ("**" if p < 0.01 else ("*" if p < 0.05 else "ns"))
-        print(f"  sbus < {sys:<12}: U={u:.0f}  p={p:.4f}  r={r:.3f}  {sig}")
+        print(f"  sbus < {sysname:<12}: U={u:.0f}  p={p:.4f}  r={r:.3f}  {sig}")
 
     print(f"\n{'='*70}")
     print("S@50 success rates")
     print(f"{'='*70}")
-    for (sys, ac), val in df.groupby(["system", "agent_count"])["success"].mean().items():
-        n = len(df[(df["system"] == sys) & (df["agent_count"] == ac)])
-        print(f"  {sys:<14} N={ac}: {val*100:.1f}%  (n={n})")
+    for (sysname, ac), val in df.groupby(["system", "agent_count"])["success"].mean().items():
+        n = len(df[(df["system"] == sysname) & (df["agent_count"] == ac)])
+        print(f"  {sysname:<14} N={ac}: {val*100:.1f}%  (n={n})")
 
     print(f"\n{'='*70}")
     print("SWE-bench CW CWR variance check (flag if std < 0.005)")

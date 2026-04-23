@@ -43,7 +43,14 @@ This quantifies the exact trade-off: S-Bus pays more tokens for parallelism;
 LangGraph-PG pays more time for token efficiency.
 """
 
-import os, sys, json, csv, time, uuid, asyncio, argparse, statistics
+import os
+import sys
+import csv
+import time
+import uuid
+import asyncio
+import argparse
+import statistics
 import psycopg2
 import httpx
 from openai import AsyncOpenAI
@@ -124,7 +131,6 @@ async def run_langgraph_pg(task: dict, pg: PGShardBackend,
     Each step: supervisor reads all agents' output → condenses → writes.
     This is the token-efficient but sequentialised approach.
     """
-    total_tokens = 0
     coord_tokens = 0
     work_tokens  = 0
     commits      = 0
@@ -194,7 +200,7 @@ async def run_sbus(task: dict, shard_key: str, n_agents: int) -> dict:
     conflicts = 0
 
     async def one_agent(agent_id: str):
-        nonlocal coord_tokens, work_tokens, commits, conflicts
+        nonlocal work_tokens, commits, conflicts
         async with httpx.AsyncClient(timeout=60.0) as http:
             for step in range(N_STEPS // n_agents):
                 r = await http.get(f"{SBUS_URL}/shard/{shard_key}",
@@ -262,7 +268,7 @@ async def main():
             assert r.status_code == 200
         print(f"S-Bus OK at {SBUS_URL}")
     except Exception:
-        print(f"S-Bus not reachable. Run: cargo run --release")
+        print("S-Bus not reachable. Run: cargo run --release")
         sys.exit(1)
 
     tasks = TASKS[:args.tasks]
@@ -288,11 +294,11 @@ async def main():
             })
 
         # Run both systems
-        print(f"  Running LangGraph-PG...", end=" ", flush=True)
+        print("  Running LangGraph-PG...", end=" ", flush=True)
         pg_result = await run_langgraph_pg(task, pg, shard_key_pg, args.agents)
         print(f"tokens={pg_result['total_tokens']:,} wall={pg_result['wall_ms']//1000}s")
 
-        print(f"  Running S-Bus...", end=" ", flush=True)
+        print("  Running S-Bus...", end=" ", flush=True)
         sb_result = await run_sbus(task, shard_key_sbus, args.agents)
         print(f"tokens={sb_result['total_tokens']:,} wall={sb_result['wall_ms']//1000}s")
 
@@ -338,7 +344,7 @@ async def main():
                   max(statistics.mean(r["wall_ms"] for r in pg_rows), 1)
     print(f"\nS-Bus uses {token_ratio:.2f}× more total tokens than LangGraph-PG")
     print(f"S-Bus uses {wall_ratio:.2f}× the wall time of LangGraph-PG")
-    print(f"Both achieve zero Type-I corruptions → correctness equivalent")
+    print("Both achieve zero Type-I corruptions → correctness equivalent")
     print(f"\nConclusion: S-Bus trades {token_ratio:.1f}× token cost for {1/wall_ratio:.1f}× wall time.")
     print(f"Results written to {args.output}")
 

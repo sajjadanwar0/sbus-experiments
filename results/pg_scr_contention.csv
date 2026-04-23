@@ -1,9 +1,0 @@
-topology,n_agents,n_steps,total_commits,commits,conflicts,corruptions,scr,server_errors
-distinct,3,10,30,30,0,0,0.0,0
-distinct,4,10,40,10,30,0,0.75,0
-distinct,8,10,80,39,41,0,0.5125,0
-distinct,16,10,160,76,84,0,0.525,0
-shared,4,10,0,0,40,0,1.0,0
-shared,8,10,0,0,80,0,1.0,0
-shared,16,10,0,0,160,0,1.0,0
-baseline_no_version_check,4,10,1,1,39,0,0.975,0

@@ -52,9 +52,8 @@ import uuid
 import socket
 import argparse
 import threading
-import queue as queue_mod
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from urllib.request import Request, ProxyHandler, build_opener
 from urllib.parse import urlencode
 from urllib.error import HTTPError
@@ -564,7 +563,7 @@ def _print_final_summary(counts: dict, args) -> None:
             continue
         s50  = c["correct"] / t
         corr = c["corrupted"] / t
-        incl = c["incomplete"] / t
+        c["incomplete"] / t
         rates[k] = s50
         bar = "█" * int(s50 * 30) + "░" * (30 - int(s50 * 30))
         print(f"  {k}/{N_AGENTS} stale ({k*25:3d}%): "
@@ -661,7 +660,7 @@ def _run_stats(csv_path: str, stale_counts: list) -> None:
     c3, nc3, n3 = get_counts(3)
     if n1 > 0 and n3 > 0:
         _, p13 = scipy_stats.fisher_exact([[c1, nc1], [c3, nc3]], alternative="two-sided")
-        print(f"\n  k=1 vs k=3 (diversity peak vs high stale):")
+        print("\n  k=1 vs k=3 (diversity peak vs high stale):")
         print(f"    k=1: {c1/n1*100:.1f}%  k=3: {c3/n3*100:.1f}%  "
               f"p={p13:.4f}  {'✅ sig' if p13 < 0.05 else '– n.s.'}")
 

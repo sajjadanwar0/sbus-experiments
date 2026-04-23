@@ -1,1 +1,25 @@
-/experiemntations.zip
+__pycache__/
+*.py[cod]
+*.ruff_cache/
+.venv/
+venv/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Results & data (too large for git, see Zenodo)
+results/
+*.csv
+*.json
+!shared_state_tasks.json
+!sjv4_tasks.json
+!tasks.json
+!datasets/tasks_30_multidomain.json
+*.log
+
+# Credentials
+.env
+credentials.json

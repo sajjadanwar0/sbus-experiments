@@ -18,7 +18,12 @@ Run:
     # Then run:
     python3 pg_rc_sfu.py --url http://localhost:7001 --out results/pg_rc_sfu.csv
 """
-import argparse, csv, os, time, sys, random
+import argparse
+import csv
+import os
+import time
+import sys
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import httpx
 
@@ -66,7 +71,7 @@ def agent(agent_id, key, steps, results):
 def run(topology, N, steps, keys):
     for k in keys: delete_shard(k); create_shard(k)
     results = []
-    pre = {k: get_ver(k) for k in keys}
+    {k: get_ver(k) for k in keys}
     with ThreadPoolExecutor(max_workers=N) as pool:
         futs = [pool.submit(agent, f"a{i}", random.choice(keys), steps, results)
                 for i in range(N)]

@@ -1,1 +1,0 @@
-run_id,system,agent_count,task_id,coord_tokens,work_tokens,cwr,steps_taken,success,commit_attempts,commit_conflicts,scr,wall_ms,model,sdk_version

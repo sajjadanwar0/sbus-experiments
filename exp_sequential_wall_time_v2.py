@@ -1,31 +1,13 @@
-#!/usr/bin/env python3
-"""
-exp_sequential_wall_time_v2.py — Wall-Time + Latency Breakdown
-==============================================================
-FIXES over v1/v3:
-  FIX-1: Seeds each shard with a real task description so agents have
-          non-empty context → LLM produces meaningful deltas → commits succeed.
-  FIX-2: Tracks llm_calls and commit_ok separately per run.
-  FIX-3: Latency breakdown: measures llm_ms vs sbus_ms vs retry_ms per run.
-  FIX-4: Semantic judge reads final shard content (non-empty) → valid verdict.
-  FIX-5: delta trimmed to 1800 chars (under SBUS_MAX_DELTA=2000).
-  FIX-6: Column names consistent with v3 schema.
-
-USAGE
------
-  # Smoke test (~10 min)
-  OPENAI_API_KEY=sk-... python3 exp_sequential_wall_time_v2.py \\
-      --n-tasks 3 --n-agents-list 4 8 --n-steps 4 --n-repeats 2 \\
-      --workers 2 --output results/exp_sequential_v4.csv
-
-  # Paper quality (~90 min)
-  OPENAI_API_KEY=sk-... python3 exp_sequential_wall_time_v2.py \\
-      --n-tasks 10 --n-agents-list 4 8 16 --n-steps 8 --n-repeats 3 \\
-      --workers 2 --output results/exp_sequential_v4.csv
-"""
-
-import argparse, csv, json, math, os, random, sys
-import threading, time, uuid
+import argparse
+import csv
+import json
+import math
+import os
+import random
+import sys
+import threading
+import time
+import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.request import Request, urlopen
@@ -39,11 +21,11 @@ except ImportError:
 
 SBUS_URL = os.getenv("SBUS_URL", "http://localhost:7000")
 BACKBONE = "gpt-4o-mini"
-MAX_DELTA = 1800   # chars; SBUS_MAX_DELTA default is 2000
+MAX_DELTA = 1800
 
 TASKS = [
     {"id": f"t{i:02d}", "domain": d, "problem": p,
-     "seed": s}                            # FIX-1: seed content for shard
+     "seed": s}
     for i, (d, p, s) in enumerate([
         ("django",
          "Fix Django queryset ordering with select_related FK traversal",
@@ -89,8 +71,6 @@ TASKS = [
     ])
 ]
 
-# ── Rate limiter ──────────────────────────────────────────────────────────────
-
 class RateLimiter:
     def __init__(self, rpm=250):
         self._interval = 60.0 / rpm
@@ -102,8 +82,6 @@ class RateLimiter:
             w = self._last + self._interval - now
             if w > 0: time.sleep(w)
             self._last = time.monotonic()
-
-# ── S-Bus API ─────────────────────────────────────────────────────────────────
 
 def _req(method, path, body=None, params=None):
     url = SBUS_URL + path
@@ -120,7 +98,6 @@ def _req(method, path, body=None, params=None):
     except: return 0, {}
 
 def create_shard(key, domain, seed_content=""):
-    # FIX-1: pass seed_content so shard is non-empty from the start
     st, _ = _req("POST", "/shard",
                  {"key": key, "content": seed_content, "goal_tag": domain})
     return st in (200, 201)
@@ -135,7 +112,6 @@ def read_shard(key, agent_id):
     return 0, ""
 
 def do_commit(key, agent_id, expected_version, delta):
-    # Trim delta to stay under SBUS_MAX_DELTA  (FIX-5)
     delta = delta[:MAX_DELTA]
     st, resp = _req("POST", "/commit/v2", {
         "key": key, "expected_version": expected_version,
@@ -149,8 +125,6 @@ def health_check():
     except: return False
     st, _ = _req("GET", "/stats")
     return st == 200
-
-# ── LLM call ─────────────────────────────────────────────────────────────────
 
 def llm_call(oai, rl, problem, context, agent_id, step):
     rl.acquire()
@@ -169,8 +143,6 @@ def llm_call(oai, rl, problem, context, agent_id, step):
     llm_ms = int((time.perf_counter() - t0) * 1000)
     delta = f"[{agent_id}_s{step}] {text}"
     return delta, llm_ms
-
-# ── Simple semantic judge (FIX-4) ────────────────────────────────────────────
 
 JUDGE_SYS = (
     "You evaluate a collaborative technical document. "
@@ -196,8 +168,6 @@ def judge_content(oai, rl, problem, content):
         return v if v in ("COMPLETE", "INCOMPLETE", "CORRUPTED") else "INCOMPLETE"
     except:
         return "INCOMPLETE"
-
-# ── Parallel condition ────────────────────────────────────────────────────────
 
 def _step_par(oai, rl, shard, agent_id, problem, step, snap_ver, snap_content):
     delta, llm_ms = llm_call(oai, rl, problem, snap_content, agent_id, step)
@@ -241,7 +211,6 @@ def run_parallel(oai, rl, task, n_agents, n_steps, run_id):
                 if ok: commits_ok += 1
     wall = time.perf_counter() - t0
 
-    # Read final content for judge
     _, final_content = read_shard(shard, agents[0])
     verdict = judge_content(oai, rl, task["problem"], final_content)
 
@@ -254,8 +223,6 @@ def run_parallel(oai, rl, task, n_agents, n_steps, run_id):
         "avg_sbus_ms": round(total_sbus_ms / max(1, llm_calls)),
         "verdict": verdict, "s50": 0.0,
     }
-
-# ── Sequential condition ──────────────────────────────────────────────────────
 
 def run_sequential(oai, rl, task, n_agents, n_steps, run_id):
     shard = f"wt_{run_id}_s"
@@ -291,8 +258,6 @@ def run_sequential(oai, rl, task, n_agents, n_steps, run_id):
         "verdict": verdict, "s50": 0.0,
     }
 
-# ── Stats ────────────────────────────────────────────────────────────────────
-
 def bootstrap_speedup(par, seq, n=2000, seed=42):
     rng = random.Random(seed)
     vals = []
@@ -316,8 +281,6 @@ def wilcoxon_p(x, y):
         return sum(math.comb(n, k) * (0.5**n)
                    for k in range(pos, n + 1)) if n else 1.0
 
-# ── CSV writer ────────────────────────────────────────────────────────────────
-
 class CSVWriter:
     def __init__(self, path):
         os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".",
@@ -337,8 +300,6 @@ class CSVWriter:
 _pl = threading.Lock()
 def tprint(*a, **k):
     with _pl: print(*a, **k)
-
-# ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     ap = argparse.ArgumentParser()
@@ -431,8 +392,8 @@ def main():
         with open(sumpath, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(summary_rows[0].keys()))
             w.writeheader(); w.writerows(summary_rows)
-        print(f"\nSummary  → {sumpath}")
-    print(f"Full data → {args.output}")
+        print(f"\nSummary  -> {sumpath}")
+    print(f"Full data -> {args.output}")
 
 if __name__ == "__main__":
     main()

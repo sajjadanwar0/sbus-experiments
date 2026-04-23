@@ -344,7 +344,7 @@ def analyse(results: list[RunResult]):
         r       = 1 - (2 * stat) / (n1 * n2)
         sig     = "***" if p < 0.0001 else "**" if p < 0.001 else "*" if p < 0.05 else "ns"
         print(f"\n  Mann-Whitney U={stat:.0f}  p={p:.4f}  r={r:.3f}  {sig}")
-        print(f"  (r=1.0 = complete separation; every S-Bus obs < every CW obs)")
+        print("  (r=1.0 = complete separation; every S-Bus obs < every CW obs)")
 
     print("\n  Per-task breakdown:")
     print(f"  {'Task ID':<40} {'S-Bus CWR':>10} {'CW CWR':>10} {'Reduction':>10}")

@@ -579,7 +579,7 @@ def main():
         diff = (merge_rate - occ_rate) * 100
         print(f"MERGE outperforms OCC by ${diff:.1f}$~pp in correctness.")
     else:
-        print(f"OCC and MERGE achieve comparable correctness.")
+        print("OCC and MERGE achieve comparable correctness.")
     print(f"MERGE non-determinism rate (Jaccard$<$0.6): ${nondeterministic/n*100:.1f}\\%$.")
     if occ_latencies and merge_latencies:
         print(f"Median latency: OCC~{stat.median(occ_latencies):.0f}ms vs.\\ MERGE~{stat.median(merge_latencies):.0f}ms.")

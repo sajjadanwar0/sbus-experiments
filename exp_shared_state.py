@@ -1,47 +1,12 @@
-#!/usr/bin/env python3
-"""
-exp_shared_state.py — Shared-State Multi-Agent Evaluation
-==========================================================
-Replaces SWE-bench with tasks that have GENUINE shared-state contention:
-finance, healthcare, software architecture, devops, legal.
-
-Each task has:
-  - A single shared shard all N agents write to (guaranteed contention)
-  - Ground-truth consistency checks (not just code completion)
-  - Known conflict scenarios where stale reads produce detectable errors
-
-This experiment runs three conditions:
-  A) S-Bus ORI-ON  : parallel agents, OCC enforced
-  B) S-Bus ORI-OFF : parallel agents, LWW (no retry on 409)
-  C) Sequential    : agents run one after another (no conflicts possible)
-
-Primary metrics:
-  - consistency_rate: fraction of runs where judge finds all GT checks pass
-  - corruption_rate:  fraction of runs with detected contradictions
-  - commit_rate:      fraction of commits that succeed on first attempt
-
-This directly answers the reviewer concern:
-  "Show that ORI prevents the corruptions it claims to prevent, on tasks
-   where shared-state contention is the actual bottleneck."
-
-REQUIRES
---------
-  cargo run --release  (port 7000)
-  pip install openai anthropic scipy
-
-USAGE
------
-  # Quick (5 tasks × 10 runs, ~25min)
-  OPENAI_API_KEY=sk-... python3 exp_shared_state.py \\
-      --n-tasks 5 --n-runs 10 --workers 4
-
-  # Paper-quality (10 tasks × 30 runs, ~2h)
-  OPENAI_API_KEY=sk-... python3 exp_shared_state.py \\
-      --n-tasks 10 --n-runs 30 --workers 8 \\
-      --output results/shared_state_eval.csv
-"""
-
-import csv, json, os, sys, time, uuid, argparse, threading, socket
+import csv
+import json
+import os
+import sys
+import time
+import uuid
+import argparse
+import threading
+import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
 from urllib.request import Request, build_opener, ProxyHandler
@@ -58,8 +23,6 @@ try:
 except ImportError:
     HAS_ANTHROPIC = False
 
-# ── Config ────────────────────────────────────────────────────────────────────
-
 SBUS_URL    = os.getenv("SBUS_URL", "http://localhost:7000")
 BACKBONE    = "gpt-4o-mini"
 JUDGE_MODEL = "claude-haiku-4-5-20251001"
@@ -69,8 +32,6 @@ COND_ORI_OFF = "sbus_ori_off"
 COND_SEQ     = "sequential"
 
 TASKS_FILE = os.path.join(os.path.dirname(__file__), "shared_state_tasks.json")
-
-# ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 def _opener():
     return build_opener(ProxyHandler({}))
@@ -105,8 +66,6 @@ def health_check():
     st, _ = http_get(f"{SBUS_URL}/stats")
     return st == 200
 
-# ── Rate limiter ──────────────────────────────────────────────────────────────
-
 class RateLimiter:
     def __init__(self, rpm=350):
         self._interval = 60.0 / rpm
@@ -119,12 +78,7 @@ class RateLimiter:
             if w > 0: time.sleep(w)
             self._last = time.monotonic()
 
-# ── ContribTracker ────────────────────────────────────────────────────────────
-
 class ContribTracker:
-    """Thread-safe per-trial log of all successful commits.
-    Returns the full accumulated document for the judge — not just the last
-    shard value, which only contains the final agent's delta."""
     def __init__(self):
         self._entries = []
         self._lock = threading.Lock()
@@ -134,7 +88,6 @@ class ContribTracker:
             self._entries.append((step, role, delta))
 
     def document(self):
-        """Full accumulated document sorted by step then role."""
         with self._lock:
             parts = [d for _, _, d in sorted(self._entries, key=lambda x: x[0])]
         return "\n\n".join(parts) if parts else ""
@@ -143,11 +96,7 @@ class ContribTracker:
         with self._lock:
             return len(self._entries)
 
-# ── LLM helpers ───────────────────────────────────────────────────────────────
-
 def _delta(oai, rl, task, current_content, agent_role, step, shard_key=""):
-    """Generate agent contribution. Includes shard_key in prompt so the
-    proxy can detect this reference as an R_hidden read."""
     shard_hint = f"Shared document key: {shard_key.rsplit('_',1)[0] if '_' in shard_key else shard_key}\n" if shard_key else ""
     rl.acquire()
     try:
@@ -166,8 +115,6 @@ def _delta(oai, rl, task, current_content, agent_role, step, shard_key=""):
         return r.choices[0].message.content.strip()
     except Exception as e:
         return f"[{agent_role} s{step} ERR:{e}]"
-
-# ── Consistency judge ─────────────────────────────────────────────────────────
 
 JUDGE_PROMPT = """\
 You are evaluating a multi-agent collaborative document for INTERNAL CONSISTENCY.
@@ -190,8 +137,6 @@ Then one newline, then list which checks failed (if any), max 2 sentences."""
 
 def judge_consistency(task, content, oai, rl):
     checks_text = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(task["ground_truth_checks"]))
-    # 4000 chars covers ~16 agent contributions at 250 chars each
-    # (4 agents × 6 steps × 250 = 6000 total; 4000 gets ~65% coverage)
     prompt = JUDGE_PROMPT.format(
         task_desc=task["description"][:400],
         content=content[:4000] if content else "[empty]",
@@ -230,8 +175,6 @@ def judge_consistency(task, content, oai, rl):
     reason = lines[1].strip() if len(lines) > 1 else ""
     return verdict, reason
 
-# ── S-Bus helpers ─────────────────────────────────────────────────────────────
-
 def _create_shard(run_id, task):
     shard = f"{task['shards'][0]}_{run_id}"
     st, _ = http_post(f"{SBUS_URL}/shard", {
@@ -240,7 +183,6 @@ def _create_shard(run_id, task):
         "goal_tag": task["task_id"],
     })
     if st not in (200, 201):
-        # Try admin endpoint if available
         http_post(f"{SBUS_URL}/admin/shard", {
             "key":      shard,
             "content":  f"Task: {task['description'][:100]}",
@@ -257,29 +199,19 @@ def _read_shard(shard, agent_id):
 def _register(agent_id):
     http_post(f"{SBUS_URL}/session", {"agent_id": agent_id})
 
-# ── Agent roles from task ─────────────────────────────────────────────────────
-
 def _agent_roles(task, n_agents):
-    """Extract agent role names from task description."""
     desc = task["description"]
-    # Try to find "Agent N (Role):" patterns
     roles = []
     import re
     matches = re.findall(r'Agent\s+\d+\s+\(([^)]+)\)', desc)
     if matches:
         roles = matches[:n_agents]
-    # Pad with generic roles if needed
     while len(roles) < n_agents:
         roles.append(f"specialist_{len(roles)+1}")
     return roles[:n_agents]
 
-# ── Condition runners ─────────────────────────────────────────────────────────
-
 def _agent_step_ori_on(oai, rl, shard, agent_id, role, task, step,
                         snap_ver, snap_content, tracker, max_retries=5):
-    """ORI active: generate delta ONCE from snapshot, retry commit only on 409.
-    No re-generation on retry — cuts LLM calls from ~7/step to ~4/step."""
-    # Generate delta once from the snapshot content
     delta = _delta(oai, rl, task, snap_content, role, step, shard_key=shard)
     version = snap_ver
 
@@ -292,19 +224,15 @@ def _agent_step_ori_on(oai, rl, shard, agent_id, role, task, step,
             tracker.record(role, step, f"[{role}] {delta}")
             return True, attempt + 1
         if st == 409:
-            # Update version only — reuse same delta (already generated)
             version, _ = _read_shard(shard, agent_id)
             time.sleep(0.03 * (attempt + 1))
             continue
-        break   # DeltaTooLarge or other non-retryable
+        break
     return False, max_retries
 
 
 def run_ori_on(oai, rl, task, n_agents, n_steps, run_id):
-    """ORI active: concurrent reads → concurrent commits → 409 retried.
-    ContribTracker accumulates ALL successful commits for the judge."""
     shard = _create_shard(run_id, task)
-    # Tell the wrapper the actual UUID-suffixed key so promotion calls work
     if hasattr(oai, 'register_runtime_shard'):
         oai.register_runtime_shard(shard)
     roles = _agent_roles(task, n_agents)
@@ -336,8 +264,6 @@ def run_ori_on(oai, rl, task, n_agents, n_steps, run_id):
 
 
 def run_ori_off(oai, rl, task, n_agents, n_steps, run_id):
-    """ORI off: concurrent reads → concurrent commits at STALE version → LWW.
-    ContribTracker records only winning commits (others are silently lost)."""
     shard = _create_shard(run_id, task)
     if hasattr(oai, 'register_runtime_shard'):
         oai.register_runtime_shard(shard)
@@ -354,7 +280,6 @@ def run_ori_off(oai, rl, task, n_agents, n_steps, run_id):
                 i = futs[f]
                 snaps[i] = f.result()
 
-        # Capture loop variables BY VALUE via default args — classic closure fix
         def _commit_no_retry(i, _snaps=snaps, _step=step, _shard=shard):
             delta = _delta(oai, rl, task, _snaps[i][1], roles[i], _step, shard_key=_shard)
             st, resp = http_post(f"{SBUS_URL}/commit/v2", {
@@ -376,7 +301,6 @@ def run_ori_off(oai, rl, task, n_agents, n_steps, run_id):
 
 
 def run_sequential(oai, rl, task, n_agents, n_steps, run_id):
-    """Sequential: agents run one after another — no conflicts possible."""
     shard = _create_shard(run_id, task)
     roles = _agent_roles(task, n_agents)
     agents = [f"{task['task_id'][:8]}_{roles[i][:4]}_{run_id}" for i in range(n_agents)]
@@ -398,8 +322,6 @@ def run_sequential(oai, rl, task, n_agents, n_steps, run_id):
                 tracker.record(role, step, f"[{role}] {delta}")
 
     return tracker.document(), ok, tot
-
-# ── Trial ─────────────────────────────────────────────────────────────────────
 
 @dataclass
 class TrialResult:
@@ -435,8 +357,6 @@ def run_trial(oai, rl, task, run_idx, condition, n_agents, n_steps):
         wall_secs=round(wall, 1),
     ), None
 
-# ── Stats printer ─────────────────────────────────────────────────────────────
-
 def print_stats(counts, conditions):
     from scipy import stats as scipy_stats
 
@@ -449,14 +369,6 @@ def print_stats(counts, conditions):
     print("=" * 68)
     print("RESULTS: Shared-State Multi-Agent Evaluation")
     print("=" * 68)
-
-    for c in conditions:
-        d = counts[c]; t = d["total"]
-        if t == 0: continue
-        cr = d["consistent"] / t * 100
-        bar = "█" * int(cr / 100 * 30) + "░" * (30 - int(cr / 100 * 30))
-        print(f"  {labels.get(c,c):<22}: consistency={cr:5.1f}% [{bar}]  "
-              f"contradicted={d['contradicted']}  n={t}")
 
     print()
     pairs = [
@@ -497,8 +409,6 @@ def print_stats(counts, conditions):
         print(f"  {domain:<20}: {' | '.join(parts)}")
 
 
-# ── CSV writer ────────────────────────────────────────────────────────────────
-
 class CSVWriter:
     def __init__(self, path):
         os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
@@ -515,8 +425,6 @@ _pl = threading.Lock()
 def tprint(*a, **k):
     with _pl: print(*a, **k)
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tasks-file", default=TASKS_FILE)
@@ -530,7 +438,7 @@ def main():
     ap.add_argument("--rpm",       type=int, default=350)
     ap.add_argument("--output",    default="results/shared_state_eval.csv")
     ap.add_argument("--use-wrapper", action="store_true",
-                    help="Enable PhiddenWrapper to measure R_hidden→R_obs promotion")
+                    help="Enable PhiddenWrapper to measure R_hidden->R_obs promotion")
     args = ap.parse_args()
 
     if not os.environ.get("OPENAI_API_KEY"):
@@ -538,7 +446,6 @@ def main():
     if not health_check():
         print(f"ERROR: S-Bus not running at {SBUS_URL}"); sys.exit(1)
 
-    # Load tasks
     if os.path.exists(args.tasks_file):
         with open(args.tasks_file) as f:
             all_tasks = json.load(f)
@@ -549,15 +456,13 @@ def main():
 
     base_oai = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-    # Optionally wrap client to measure phidden promotion
     wrapper = None
     if args.use_wrapper:
         try:
             from phidden_wrapper import PhiddenWrapper
             wrapper = PhiddenWrapper(base_oai, sbus_url=SBUS_URL)
             oai = wrapper
-            print(f"  PhiddenWrapper: ACTIVE — scanning completions for shard refs")
-            # Pre-register all base shard names from task definitions
+            print("  PhiddenWrapper: ACTIVE — scanning completions for shard refs")
             for task in tasks:
                 for shard in task.get("shards", []):
                     wrapper.register_shards([shard])
@@ -600,7 +505,7 @@ def main():
         if result is None:
             tprint(f"\n  ERR: {err}"); return
         out.write(asdict(result))
-        sym = "✓" if result.is_consistent else ("✗" if result.is_contradicted else "·")
+        sym = "passed" if result.is_consistent else ("failed" if result.is_contradicted else "·")
         with lock:
             c = counts[condition]
             c["total"] += 1
