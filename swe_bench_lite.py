@@ -1,36 +1,3 @@
-"""
-swe_bench_lite.py
-─────────────────────────────────────────────────────────────────────────────
-CWR measurement on 10 SWE-bench Lite tasks — fills the missing contribution 4
-from §1.4 of the paper.
-
-Claim being supported:
-  "The 94.8% CWR reduction of S-Bus over coordinator-worker patterns
-   generalizes beyond the author-constructed LHP benchmark, as confirmed
-   on 10 tasks from the independently validated SWE-bench Lite dataset."
-
-What this does NOT claim:
-  We do NOT claim to resolve GitHub issues. We measure whether the
-  coordination-overhead pattern (S-Bus bounded, coordinator-worker growing)
-  holds when task content is drawn from SWE-bench Lite.
-
-  Each SWE-bench Lite task is decomposed into 3 shards:
-    bug_analysis   — root cause and reproduction
-    patch_plan     — proposed code changes (no actual execution)
-    test_strategy  — test cases that would validate the fix
-
-  Agents write natural-language plans to their shards.
-  CWR is measured identically to the LHP benchmark.
-
-Run:
-  python3 swe_bench_lite.py
-  python3 swe_bench_lite.py --agents 4 8 --tasks 10 --out results/swebenches.csv
-
-Dependencies:
-  uv add httpx openai tiktoken scipy
-  (No datasets library needed — tasks are bundled in this file)
-"""
-
 import argparse
 import csv
 import os
@@ -50,11 +17,6 @@ TEMP      = 0.2
 MAX_TOKS  = 300
 ENC       = tiktoken.encoding_for_model("gpt-4o")
 CLIENT    = OpenAI()
-
-
-# ─── 10 SWE-bench Lite tasks (hand-selected, 3-shard decomposable) ───────────
-# These are real issues from the SWE-bench Lite dataset.
-# We use their descriptions as task prompts — agents write plans, not code.
 
 SWE_TASKS = [
     {
@@ -169,9 +131,6 @@ SWE_TASKS = [
     },
 ]
 
-
-# ─── helpers ──────────────────────────────────────────────────────────────────
-
 def count_tokens(text: str) -> int:
     return len(ENC.encode(text))
 
@@ -203,9 +162,6 @@ def sbus_commit(key: str, version: int, delta: str, agent_id: str) -> bool:
                    timeout=15)
     return r.status_code == 200
 
-
-# ─── result ──────────────────────────────────────────────────────────────────
-
 @dataclass
 class RunResult:
     run_id:       str
@@ -217,9 +173,6 @@ class RunResult:
     work_tokens:  int
     cwr:          float
     wall_time_s:  float
-
-
-# ─── S-Bus runner ─────────────────────────────────────────────────────────────
 
 def run_sbus(task: dict, n_agents: int, n_steps: int) -> RunResult:
     suffix       = f"{task['id']}_{n_agents}a_{int(time.time())}"
@@ -272,15 +225,7 @@ def run_sbus(task: dict, n_agents: int, n_steps: int) -> RunResult:
         cwr=round(cwr, 4), wall_time_s=round(wall, 1),
     )
 
-
-# ─── LangGraph coordinator-worker baseline ─────────────────────────────────
-
 def run_coordinator_worker(task: dict, n_agents: int, n_steps: int) -> RunResult:
-    """
-    Simulated coordinator-worker pattern (models LangGraph supervisor).
-    Coordinator reads all worker outputs each step and broadcasts summary.
-    This is the architectural pattern we compare against.
-    """
     suffix       = f"cw_{task['id']}_{n_agents}a_{int(time.time())}"
     coord_tokens = 0
     work_tokens  = 0
@@ -289,10 +234,9 @@ def run_coordinator_worker(task: dict, n_agents: int, n_steps: int) -> RunResult
 
     t0 = time.time()
     for step in range(step_budget):
-        # Worker phase: each agent reads full shared context
         worker_outputs = []
         for i in range(n_agents):
-            ctx_read = count_tokens(shared_ctx)  # coordination cost: full ctx
+            ctx_read = count_tokens(shared_ctx)
             coord_tokens += ctx_read
 
             output, pt, ct = llm_call(
@@ -302,13 +246,12 @@ def run_coordinator_worker(task: dict, n_agents: int, n_steps: int) -> RunResult
             work_tokens  += pt + ct
             worker_outputs.append(output)
 
-        # Coordinator phase: summarise all worker outputs
         all_outputs  = "\n\n".join(f"Agent {i}: {o}" for i, o in enumerate(worker_outputs))
         summary, pt, ct = llm_call(
             "You are a coordinator. Summarise the agents' contributions concisely.",
             f"Task: {task['description']}\n\nOutputs:\n{all_outputs}",
         )
-        coord_tokens += pt + ct  # coordinator summarisation = pure coordination cost
+        coord_tokens += pt + ct
         shared_ctx    = summary
 
     wall = time.time() - t0
@@ -319,9 +262,6 @@ def run_coordinator_worker(task: dict, n_agents: int, n_steps: int) -> RunResult
         coord_tokens=coord_tokens, work_tokens=work_tokens,
         cwr=round(cwr, 4), wall_time_s=round(wall, 1),
     )
-
-
-# ─── statistics ──────────────────────────────────────────────────────────────
 
 def analyse(results: list[RunResult]):
     sbus_cwr = [r.cwr for r in results if r.system == "sbus"]
@@ -357,9 +297,6 @@ def analyse(results: list[RunResult]):
             red = (c - s) / c
             print(f"  {tid:<40} {s:>10.3f} {c:>10.3f} {red:>9.1%}")
 
-
-# ─── CSV ─────────────────────────────────────────────────────────────────────
-
 def write_csv(results: list[RunResult], path: str):
     fields = ["run_id", "system", "task_id", "n_agents", "n_steps",
               "coord_tokens", "work_tokens", "cwr", "wall_time_s"]
@@ -374,9 +311,6 @@ def write_csv(results: list[RunResult], path: str):
                 "cwr": r.cwr, "wall_time_s": r.wall_time_s,
             })
     print(f"\nCSV written to {path}")
-
-
-# ─── main ────────────────────────────────────────────────────────────────────
 
 def main():
     ap = argparse.ArgumentParser(description="SWE-bench Lite CWR experiment")

@@ -19,6 +19,7 @@ dependencies = [
     "openai>=2.30.0",
     "pandas>=3.0.1",
     "protobuf>=5.29.6",
+    "psycopg2>=2.9.12",
     "psycopg[binary]>=3.3.3",
     "redis[hiredis]>=7.4.0",
     "scipy>=1.17.1",

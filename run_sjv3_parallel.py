@@ -1,35 +1,3 @@
-#!/usr/bin/env python3
-"""
-run_sjv3_parallel.py
-====================
-Runs exp_semantic_judge_v3.py in parallel — one process per task,
-each against its own S-Bus instance on a separate port.
-
-USAGE:
-    python3 run_sjv3_parallel.py \
-        --tasks datasets/tasks_30_multidomain.json \
-        --n-tasks 5 \
-        --n-runs 25 \
-        --n-steps 20 \
-        --base-port 7000 \
-        --sbus-bin ../../sbus/target/release/sbus \
-        --output results/sj_v3_results.csv
-
-WHAT IT DOES:
-    1. Splits tasks JSON into n-tasks separate single-task JSON files
-    2. Starts one S-Bus instance per task on ports base-port to base-port+n
-    3. Starts one exp_semantic_judge_v3.py process per task
-    4. Waits for all to finish
-    5. Merges all per-task CSVs into one final CSV
-    6. Runs statistical tests on merged results
-    7. Kills all S-Bus instances
-
-REQUIREMENTS:
-    - S-Bus binary compiled: cargo build --release
-    - exp_semantic_judge_v3.py in same directory
-    - OPENAI_API_KEY set in environment
-"""
-
 import argparse
 import csv
 import glob
@@ -43,11 +11,9 @@ from pathlib import Path
 
 
 def split_tasks(tasks_file: str, n_tasks: int, out_dir: str) -> list[str]:
-    """Split tasks JSON into one file per task. Returns list of file paths."""
     with open(tasks_file) as f:
         all_tasks = json.load(f)
 
-    # Prefer django tasks
     django = [t for t in all_tasks if "django" in t.get("task_id", "").lower()]
     other  = [t for t in all_tasks if "django" not in t.get("task_id", "").lower()]
     tasks  = (django + other)[:n_tasks]
@@ -65,7 +31,6 @@ def split_tasks(tasks_file: str, n_tasks: int, out_dir: str) -> list[str]:
 
 
 def wait_for_sbus(port: int, timeout: int = 30) -> bool:
-    """Wait until S-Bus is accepting connections on port."""
     import socket
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -79,7 +44,6 @@ def wait_for_sbus(port: int, timeout: int = 30) -> bool:
 
 
 def start_sbus(port: int, sbus_bin: str, log_dir: str) -> subprocess.Popen:
-    """Start one S-Bus instance on the given port."""
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, f"sbus_{port}.log")
     env = os.environ.copy()
@@ -109,7 +73,6 @@ def start_experiment(
     log_dir:        str,
     use_claude_judge: bool,
 ) -> subprocess.Popen:
-    """Start one exp_semantic_judge_v3.py process."""
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, f"exp_port{port}.log")
 
@@ -122,7 +85,7 @@ def start_experiment(
     cmd = [
         sys.executable, script,
         "--tasks",          task_file,
-        "--n-tasks",        "1",           # each process handles exactly 1 task
+        "--n-tasks",        "1",
         "--n-runs",         str(n_runs),
         "--n-steps",        str(n_steps),
         "--n-agents",       str(n_agents),
@@ -144,7 +107,6 @@ def start_experiment(
 
 
 def merge_csvs(pattern: str, output: str) -> int:
-    """Merge all CSVs matching pattern into output. Returns total row count."""
     files = sorted(glob.glob(pattern))
     if not files:
         print(f"  ERROR: no files matching {pattern}")
@@ -179,7 +141,6 @@ def merge_csvs(pattern: str, output: str) -> int:
 
 
 def print_summary(csv_path: str, conditions: list[str]) -> None:
-    """Print per-condition corruption rates from merged CSV."""
     if not os.path.exists(csv_path):
         return
 
@@ -214,7 +175,6 @@ def print_summary(csv_path: str, conditions: list[str]) -> None:
               f"CORRECT={c['correct']:3d}({comp_r*100:5.1f}%) | "
               f"CORRUPTED={c['corrupted']:3d}({corr_r*100:5.1f}%)")
 
-    # Key comparison: FRESH vs STALE
     a = counts.get("structural_fresh",  {"corrupted": 0, "total": 1})
     b = counts.get("structural_stale",  {"corrupted": 0, "total": 1})
     p_a = a["corrupted"] / max(1, a["total"])
@@ -257,7 +217,6 @@ def main():
                         help="Skip starting S-Bus (if already running on base-port..base-port+n)")
     args = parser.parse_args()
 
-    # ── Checks ────────────────────────────────────────────────────────────────
     if not os.environ.get("OPENAI_API_KEY"):
         print("ERROR: set OPENAI_API_KEY"); sys.exit(1)
 
@@ -280,7 +239,6 @@ def main():
     print(f"Total runs: {total}")
     print()
 
-    # ── Split tasks ───────────────────────────────────────────────────────────
     task_dir   = os.path.join(args.work_dir, "tasks")
     log_dir    = os.path.join(args.work_dir, "logs")
     result_dir = os.path.join(args.work_dir, "partial_results")
@@ -293,7 +251,6 @@ def main():
     sbus_procs = []
     exp_procs  = []
 
-    # ── Cleanup on Ctrl+C ─────────────────────────────────────────────────────
     def cleanup(sig=None, frame=None):
         print("\nCleaning up...")
         for p in exp_procs + sbus_procs:
@@ -306,7 +263,6 @@ def main():
     signal.signal(signal.SIGINT,  cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
-    # ── Start S-Bus instances ─────────────────────────────────────────────────
     ports = [args.base_port + i for i in range(len(task_files))]
 
     if not args.skip_sbus:
@@ -327,7 +283,6 @@ def main():
     else:
         print("Skipping S-Bus start (--skip-sbus set)\n")
 
-    # ── Start experiment processes ────────────────────────────────────────────
     print("Starting experiment processes...")
     for i, (task_file, port) in enumerate(zip(task_files, ports)):
         task_name  = Path(task_file).stem
@@ -360,9 +315,8 @@ def main():
     done = [False] * len(exp_procs)
 
     while not all(done):
-        time.sleep(30)  # check every 30 seconds
+        time.sleep(30)
         elapsed = int(time.time() - start_time)
-        h, m = divmod(elapsed // 60, 60)
         still_running = 0
 
         for i, proc in enumerate(exp_procs):
@@ -376,7 +330,6 @@ def main():
             else:
                 still_running += 1
 
-        # Count rows written so far
         partial_files = glob.glob(os.path.join(result_dir, "*.csv"))
         total_rows = 0
         for f in partial_files:
@@ -392,7 +345,6 @@ def main():
     elapsed = int(time.time() - start_time)
     print(f"\nAll processes finished in {elapsed//60}m {elapsed%60}s")
 
-    # ── Kill S-Bus instances ──────────────────────────────────────────────────
     if not args.skip_sbus:
         print("\nStopping S-Bus instances...")
         for proc in sbus_procs:
@@ -403,7 +355,6 @@ def main():
                 proc.kill()
         print("Done.")
 
-    # ── Merge results ─────────────────────────────────────────────────────────
     print("\nMerging results...")
     pattern = os.path.join(result_dir, "*.csv")
     n_rows = merge_csvs(pattern, args.output)
@@ -412,7 +363,6 @@ def main():
         print("ERROR: no results collected. Check logs in:", log_dir)
         sys.exit(1)
 
-    # ── Print summary ─────────────────────────────────────────────────────────
     print_summary(args.output, args.conditions)
     print(f"\nFinal results: {args.output}")
     print(f"Logs:          {log_dir}/")

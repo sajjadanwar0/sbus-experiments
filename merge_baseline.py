@@ -1,49 +1,3 @@
-#!/usr/bin/env python3
-"""
-Exp. MERGE: LLM-Assisted Merge vs. OCC Reject+Retry Baseline
-==============================================================
-This is the experiment explicitly requested by Reviewer 1 (§5, point 8):
-"A single experiment (e.g., 50 conflicts resolved by GPT-4o-mini) would show
-whether OCC's reject+retry is actually better than merge."
-
-This strengthens the comparison table in §2.4 with empirical evidence.
-
-DESIGN
-------
-For each of 50 conflicting NL delta pairs:
-  1. Generate two agents' deltas that conflict (different approaches to
-     the same problem — simulating a structural race condition).
-  2. Condition OCC: reject one delta, retry with fresh state → measure
-     whether retry produces a correct delta.
-  3. Condition MERGE: use GPT-4o-mini to merge the two conflicting deltas
-     → measure whether the merged delta is semantically correct.
-  4. Judge: blind evaluation of (OCC result, MERGE result) for each pair.
-
-METRICS
--------
-  - Correctness rate (OCC vs MERGE)
-  - Latency overhead (OCC retry cost vs MERGE cost)
-  - Non-determinism (MERGE run 2× on same input — do results agree?)
-  - Structural validity (is the output internally consistent?)
-
-This directly answers: "Is OCC reject+retry empirically better than merge?"
-
-EXPECTED OUTCOME (based on theory)
------------------------------------
-OCC favourable when: NL deltas are opaque (no structured schema for merge),
-  merge non-determinism is unacceptable, retry cost ≤ merge cost.
-MERGE favourable when: conflicts are semantically resolvable (structured NL),
-  conflict rate is high (retry storms), partial-merge is acceptable.
-
-USAGE
------
-  export OPENAI_API_KEY=sk-...
-  python3 merge_baseline.py \\
-      --n-pairs 50 \\
-      --tasks datasets/tasks_30_multidomain.json \\
-      --output results/merge_baseline.csv
-"""
-
 import argparse
 import csv
 import json
@@ -65,9 +19,6 @@ SBUS_URL = os.getenv("SBUS_URL", "http://localhost:7000")
 BACKBONE = "gpt-4o-mini"
 
 _opener = build_opener(ProxyHandler({}))
-
-
-# ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 def http_get(url, params=None):
     if params:
@@ -97,9 +48,6 @@ def reset_bus():
     http_post(f"{SBUS_URL}/admin/reset", {})
     time.sleep(0.2)
 
-
-# ── Conflict generation ───────────────────────────────────────────────────────
-
 CONFLICT_GENERATION_PROMPT = """\
 You are generating conflicting agent outputs for a research experiment.
 
@@ -126,7 +74,6 @@ def generate_conflict_pair(
     task_desc: str,
     current_state: str,
 ) -> tuple[str, str, str]:
-    """Returns (delta_a, delta_b, conflict_description)."""
     try:
         resp = oai.chat.completions.create(
             model=BACKBONE,
@@ -148,8 +95,6 @@ def generate_conflict_pair(
         return f"Error: {e}", f"Error: {e}", "generation_failed"
 
 
-# ── OCC condition ─────────────────────────────────────────────────────────────
-
 def run_occ_condition(
     oai: OpenAI,
     task_desc: str,
@@ -158,16 +103,10 @@ def run_occ_condition(
     shard_key: str,
     initial_content: str,
 ) -> dict:
-    """
-    OCC condition: commit delta_a (succeeds), reject delta_b (version conflict),
-    then retry: agent_b reads fresh state and generates a new delta.
-    Returns metrics: correctness, retry_needed, latency_ms.
-    """
     reset_bus()
     run_id = uuid.uuid4().hex[:6]
     shard  = f"{shard_key}_{run_id}"
 
-    # Create shard
     http_post(f"{SBUS_URL}/shard", {
         "key":      shard,
         "content":  initial_content,
@@ -176,7 +115,6 @@ def run_occ_condition(
 
     t0 = time.time()
 
-    # Agent A reads at version 0 and commits successfully
     _, data = http_get(f"{SBUS_URL}/shard/{shard}", {"agent_id": "agent_a"})
     ver_a = data.get("version", 0)
     status_a, resp_a = http_post(f"{SBUS_URL}/commit/v2", {
@@ -188,7 +126,6 @@ def run_occ_condition(
     })
     new_ver = resp_a.get("new_version", ver_a + 1)
 
-    # Agent B tries to commit at old version → rejected
     status_b, _ = http_post(f"{SBUS_URL}/commit/v2", {
         "key":              shard,
         "expected_version": ver_a,   # stale version
@@ -196,11 +133,10 @@ def run_occ_condition(
         "agent_id":         "agent_b",
         "read_set":         [{"key": shard, "version_at_read": ver_a}],
     })
-    # Status should be 409 (VersionMismatch)
+
     rejected = (status_b == 409)
     retry_needed = rejected
 
-    # OCC retry: agent B reads fresh state and generates new delta
     retry_delta = ""
     retry_status = None
     if rejected:
@@ -231,7 +167,6 @@ def run_occ_condition(
 
     latency_ms = round((time.time() - t0) * 1000)
 
-    # Get final state
     _, final = http_get(f"{SBUS_URL}/shard/{shard}", {"agent_id": "judge"})
     final_content = final.get("content", "")
 
@@ -244,9 +179,6 @@ def run_occ_condition(
         "latency_ms":        latency_ms,
         "n_llm_calls":       3 if retry_needed else 2,  # gen conflict + commit_a + retry
     }
-
-
-# ── MERGE condition ───────────────────────────────────────────────────────────
 
 MERGE_PROMPT = """\
 You are resolving a conflict between two agent outputs in a software engineering task.
@@ -273,13 +205,8 @@ def run_merge_condition(
     delta_b: str,
     initial_content: str,
 ) -> dict:
-    """
-    MERGE condition: use LLM to merge conflicting deltas, then commit.
-    Runs merge twice to assess non-determinism.
-    """
     t0 = time.time()
 
-    # Merge attempt 1
     try:
         resp1 = oai.chat.completions.create(
             model=BACKBONE, max_tokens=150, temperature=0.3,
@@ -294,7 +221,6 @@ def run_merge_condition(
     except Exception as e:
         merge1 = f"Error: {e}"
 
-    # Merge attempt 2 (for non-determinism measurement)
     try:
         resp2 = oai.chat.completions.create(
             model=BACKBONE, max_tokens=150, temperature=0.3,
@@ -311,25 +237,20 @@ def run_merge_condition(
 
     latency_ms = round((time.time() - t0) * 1000)
 
-    # Non-determinism: do the two merge attempts agree?
-    # Simple heuristic: check Jaccard similarity of word sets
     words1 = set(merge1.lower().split())
     words2 = set(merge2.lower().split())
     jaccard = len(words1 & words2) / max(1, len(words1 | words2))
-    non_deterministic = jaccard < 0.6  # less than 60% word overlap = divergent
+    non_deterministic = jaccard < 0.6
 
     return {
-        "final_content":       merge1,  # use first merge as the committed result
+        "final_content":       merge1,
         "merge1":              merge1,
         "merge2":              merge2,
         "jaccard_similarity":  round(jaccard, 4),
         "non_deterministic":   non_deterministic,
         "latency_ms":          latency_ms,
-        "n_llm_calls":         3,  # gen conflict + merge1 + merge2 (for determinism check)
+        "n_llm_calls":         3,
     }
-
-
-# ── Judge ─────────────────────────────────────────────────────────────────────
 
 JUDGE_PROMPT = """\
 Task: {task_desc}
@@ -382,20 +303,13 @@ def judge_result(
     except Exception as e:
         return "PARTIAL", f"Judge error: {e}"
 
-
-# ── Result dataclass ──────────────────────────────────────────────────────────
-
 @dataclass
 class MergeResult:
     pair_id:          str
     task_id:          str
-
-    # Conflict info
     delta_a:          str
     delta_b:          str
     conflict_desc:    str
-
-    # OCC metrics
     occ_verdict:      str
     occ_correct:      bool
     occ_retry_needed: bool
@@ -403,8 +317,6 @@ class MergeResult:
     occ_latency_ms:   int
     occ_llm_calls:    int
     occ_final:        str
-
-    # MERGE metrics
     merge_verdict:    str
     merge_correct:    bool
     merge_nondeterministic: bool
@@ -412,12 +324,7 @@ class MergeResult:
     merge_latency_ms: int
     merge_llm_calls:  int
     merge_final:      str
-
-    # Winner
-    winner:           str  # "OCC" | "MERGE" | "TIE" | "BOTH_WRONG"
-
-
-# ── Main ──────────────────────────────────────────────────────────────────────
+    winner:           str
 
 def main():
     parser = argparse.ArgumentParser(description="Exp. MERGE: LLM merge vs OCC baseline")
@@ -463,7 +370,6 @@ def main():
         print(f"  Pair {i+1:02d}/{args.n_pairs}: [{tid[:35]}] ...", end=" ", flush=True)
         t0 = time.time()
 
-        # Generate conflicting pair
         initial = f"Current design for {tid}: initial state"
         delta_a, delta_b, conflict_desc = generate_conflict_pair(oai, desc, initial)
 
@@ -471,11 +377,8 @@ def main():
             print("SKIP (generation failed)")
             continue
 
-        # Run both conditions
         occ_res   = run_occ_condition(oai, desc, delta_a, delta_b, shard_key, initial)
         merge_res = run_merge_condition(oai, desc, delta_a, delta_b, initial)
-
-        # Judge both
         occ_verdict,   occ_reason   = judge_result(oai, desc, delta_a, delta_b, occ_res["final_content"])
         merge_verdict, merge_reason = judge_result(oai, desc, delta_a, delta_b, merge_res["final_content"])
 
@@ -533,8 +436,6 @@ def main():
         print(f"OCC={occ_verdict:<9} MERGE={merge_verdict:<9} winner={winner:<10} {time.time()-t0:.0f}s")
 
     out_f.close()
-
-    # ── Summary ───────────────────────────────────────────────────────────────
     n = max(1, pairs_done)
     occ_rate   = occ_correct_count   / n
     merge_rate = merge_correct_count / n
@@ -563,30 +464,6 @@ def main():
     print()
     print(f"  Winner breakdown: OCC={occ_wins} MERGE={merge_wins} TIE={ties} BOTH_WRONG={both_wrong}")
     print()
-
-    # Paper text
-    print("Paper text (§2.4 LLM-assisted merge comparison):")
-    print()
-    print("\\paragraph{Empirical comparison (Exp.~MERGE).}")
-    print(f"We compared OCC reject+retry against LLM-assisted merge on {n} conflicting")
-    print("NL delta pairs drawn from {args.tasks} tasks. Results:")
-    print(f"OCC correctness: ${occ_rate*100:.1f}\\%$ ({occ_correct_count}/{n});")
-    print(f"MERGE correctness: ${merge_rate*100:.1f}\\%$ ({merge_correct_count}/{n}).")
-    if occ_rate > merge_rate:
-        diff = (occ_rate - merge_rate) * 100
-        print(f"OCC outperforms MERGE by ${diff:.1f}$~pp in correctness.")
-    elif merge_rate > occ_rate:
-        diff = (merge_rate - occ_rate) * 100
-        print(f"MERGE outperforms OCC by ${diff:.1f}$~pp in correctness.")
-    else:
-        print("OCC and MERGE achieve comparable correctness.")
-    print(f"MERGE non-determinism rate (Jaccard$<$0.6): ${nondeterministic/n*100:.1f}\\%$.")
-    if occ_latencies and merge_latencies:
-        print(f"Median latency: OCC~{stat.median(occ_latencies):.0f}ms vs.\\ MERGE~{stat.median(merge_latencies):.0f}ms.")
-    print("These results confirm the theoretical analysis in Table~\\ref{tab:merge_comparison}:")
-    print("OCC is preferable for opaque NL state; MERGE is preferable for resolvable structured NL.")
-
-    print(f"\nResults: {args.output}")
 
 
 if __name__ == "__main__":

@@ -1,26 +1,6 @@
-#!/usr/bin/env python3
-"""
-diagnose_disagreements.py
-
-Error analysis for inter-LLM disagreements. Surfaces patterns to help
-decide whether:
-  (a) the task is genuinely ambiguous (report kappa honestly), or
-  (b) one judge has a systematic failure mode (fix the JUDGE, not the
-      prompt — e.g. raise max_tokens, handle empty shards differently), or
-  (c) the dataset has a quality issue (fix the dataset).
-
-It does NOT suggest prompt changes. If you're tempted to change the
-frozen prompt because of what this script shows you, stop.
-
-Usage:
-    python3 diagnose_disagreements.py gpt4o_labels.csv claude_sonnet_labels.csv [N_SAMPLES]
-
-N_SAMPLES = how many disagreements to print per direction (default 8).
-"""
 import csv
 import sys
 from collections import Counter, defaultdict
-
 
 def load(path):
     out = {}
@@ -61,7 +41,6 @@ def main():
     print(f"  agreement:  {(len(yy)+len(nn))}/{n} = {pct(len(yy)+len(nn), n)}")
     print()
 
-    # Extraction failures (suggests format-parsing bugs, not prompt issues)
     def fails(d):
         return sum(1 for v in d.values()
                    if "EXTRACTION FAILED" in (v.get("reasoning") or ""))
@@ -69,8 +48,6 @@ def main():
     print(f"  Judge A: {fails(a)}    Judge B: {fails(b)}")
     print()
 
-    # Empty-shard handling (Rule R1). If a judge says Yes when content is empty
-    # or evidence is NONE, R1 is being ignored.
     def r1_violations(d):
         v = 0
         for row in d.values():
@@ -82,7 +59,6 @@ def main():
     print(f"  Judge B: {r1_violations(b)}")
     print()
 
-    # Step-reached distribution, split by agree/disagree
     def step_counts(subset, d):
         return Counter(d[k].get("step_reached", "") or "?" for k in subset)
     agreeing = yy + nn
@@ -95,7 +71,6 @@ def main():
     print("   ambiguous part of the task. That's a finding, not a bug.)")
     print()
 
-    # Per-domain agreement — is the κ dragged down by one bad domain?
     per_domain = defaultdict(lambda: [0, 0])  # [agree, total]
     for k in keys:
         dom = a[k].get("domain", "?")
@@ -108,7 +83,6 @@ def main():
         print(f"  {dom:32s}  {ag:3d}/{tot:<3d} = {pct(ag, tot)}")
     print()
 
-    # Self-report as a prior on disagreement
     def agent_yes(k):
         return a[k].get("agent_said_used_it", "").lower() == "yes"
     a_yes_on_agent_yes = sum(1 for k in disagreeing
@@ -126,7 +100,6 @@ def main():
     print("   but the change text sometimes echoes it.)")
     print()
 
-    # Evidence length distribution on Yes labels
     def ev_lens(d, label):
         return [len((v.get("evidence") or "").strip())
                 for v in d.values() if v["llm_label"] == label
@@ -139,7 +112,6 @@ def main():
                   f"n={len(lens)}, mean={avg:.0f}, max={max(lens)}")
     print()
 
-    # Sample disagreements for qualitative inspection
     print("=" * 72)
     print(f"Sample disagreements (up to {n_samples} per direction)")
     print("=" * 72)

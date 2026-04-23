@@ -1,48 +1,3 @@
-#!/usr/bin/env python3
-"""
-pg_bench_full.py — Full PG-Comparison benchmark for S-Bus v47+
-
-Runs the SWE-bench-style coordination workload against TWO backends:
-  - S-Bus     (Rust server on :7000, ORI / per-key OCC)
-  - PG-SER    (PostgreSQL SERIALIZABLE on :7001 via pg_sbus_server.py)
-
-Sweep:
-  - 30 SWE-bench tasks (Lite + extension; tasks come from swe_bench_lite.py)
-  - N agents in {4, 8, 16}
-  - 3 repeats per (task, N, backend) combination
-  - = 30 × 3 × 3 × 2 = 540 runs total
-
-Output:
-  - results/pg_comparison_full.csv  (one row per run; appendable / resumable)
-  - results/pg_comparison_progress.json (checkpoint state)
-
-Usage:
-  # Pre-flight: both servers must be running
-  cargo run                           # terminal 1: S-Bus on :7000
-  python3 pg_sbus_server.py           # terminal 2: PG-SER on :7001
-  export OPENAI_API_KEY=sk-...
-
-  # Full run (~2-3 days unattended on Lightsail; resume if interrupted)
-  python3 pg_bench_full.py --backends sbus pg --tasks 30 \\
-      --agent-counts 4 8 16 --repeats 3
-
-  # Resume after interruption (auto-detects checkpoint)
-  python3 pg_bench_full.py --resume
-
-  # Analyse-only (no new runs)
-  python3 pg_bench_full.py --analyse-only
-
-Honest scope:
-  This benchmark measures the SAME workload under TWO concurrency-control
-  mechanisms. It does NOT compare LLM task success rates across backends
-  (both backends use the same LLM and produce the same content, modulo
-  retry timing). The metrics that matter are: structural conflicts caught,
-  Type-I corruptions (silent stale commits accepted), commit attempts,
-  per-run wall time. The headline result for the paper is the absence of
-  Type-I corruptions in BOTH backends — refuting the "any DB CC system
-  would have given you the same guarantee for free" reviewer objection.
-"""
-
 import argparse
 import csv
 import json
@@ -54,8 +9,8 @@ import traceback
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
+import httpx
 
-# Local imports — these come from your sbus-python/ tree
 THIS_DIR = Path(__file__).parent
 sys.path.insert(0, str(THIS_DIR))
 
@@ -67,12 +22,7 @@ logging.basicConfig(
 log = logging.getLogger("pg_bench_full")
 
 
-# ── Tasks ────────────────────────────────────────────────────────────────
 def load_tasks(n_tasks: int) -> list[dict]:
-    """Load SWE-bench-style tasks. Reads from swe_bench_lite.py if present;
-    otherwise falls back to a synthetic stub set so the harness is
-    self-contained and testable.
-    """
     try:
         from swe_bench_lite import TASKS as SWE_TASKS  # type: ignore
         log.info(f"Loaded {len(SWE_TASKS)} tasks from swe_bench_lite.py")
@@ -91,8 +41,6 @@ def load_tasks(n_tasks: int) -> list[dict]:
 
 
 def _synthetic_tasks(n: int) -> list[dict]:
-    """Self-contained fallback so the harness can smoke-test without
-    swe_bench_lite present."""
     domains = [
         ("django.queryset.ordering", "ORM analyst", "Patch designer", "Test engineer"),
         ("astropy.fits.headers",     "FITS analyst", "Header patcher", "Test engineer"),
@@ -117,12 +65,11 @@ def _synthetic_tasks(n: int) -> list[dict]:
     return out
 
 
-# ── Backends ─────────────────────────────────────────────────────────────
 @dataclass
 class Backend:
     name: str
     url: str
-    expected_409_status: int = 409  # both S-Bus and PG-SER return 409
+    expected_409_status: int = 409
 
 
 BACKENDS = {
@@ -131,8 +78,6 @@ BACKENDS = {
     "redis": Backend(name="redis", url=os.getenv("REDIS_URL", "http://localhost:7002")),
 }
 
-
-# ── Run record ───────────────────────────────────────────────────────────
 @dataclass
 class RunResult:
     task_id: str
@@ -143,8 +88,8 @@ class RunResult:
     commit_attempts: int
     commits_succeeded: int
     conflicts_409: int
-    type_i_corruptions: int  # silent stale commit accepted (must be 0)
-    final_versions: dict  # shard_key -> final_version
+    type_i_corruptions: int
+    final_versions: dict
     success: bool
     error: Optional[str] = None
     started_at: str = ""
@@ -163,33 +108,8 @@ CSV_FIELDS = [
     "success", "error", "started_at", "ended_at",
 ]
 
-
-# ── Single run: drive N agents through min_steps coordination steps ──────
 def run_one(task: dict, backend: Backend, n_agents: int, repeat: int,
             steps: int, openai_key: str, timeout_s: float) -> RunResult:
-    """
-    Execute one (task, backend, N, repeat) trial.
-
-    Each agent owns one shard from task["shards"] (cycling if N > shards).
-    For each step:
-      1. Each agent issues GET on its shard and on a sibling shard (creates
-         cross-shard read-set entry, the input ORI validates).
-      2. Each agent generates a delta (just version+content append; the
-         coordination behaviour, not LLM output, is what we measure).
-      3. Each agent attempts COMMIT with expected version.
-      4. Track conflicts (HTTP 409) and successful commits.
-      5. Type-I corruption check: a commit that succeeds despite a stale
-         expected_version — should be impossible under either backend's CC,
-         and we flag any occurrence.
-
-    The simple synthetic deltas (rather than real LLM calls) are intentional:
-    the question is "does the CC mechanism prevent corruption", not "what
-    does the LLM say". Eliminating LLM noise also makes the 540-run sweep
-    finish in hours rather than days. For LLM-output benchmarks we have
-    Exp.B / T3-A / T3-B already.
-    """
-    import httpx  # imported lazily so harness can smoke-test offline
-
     started = time.time()
     started_iso = time.strftime("%FT%TZ", time.gmtime(started))
 
@@ -208,17 +128,13 @@ def run_one(task: dict, backend: Backend, n_agents: int, repeat: int,
         started_at=started_iso,
     )
 
-    # 1. Initialise shards on the backend.
     shard_keys = [s["key"] for s in task["shards"]]
     session_id = f"{task['id']}:{backend.name}:N{n_agents}:r{repeat}"
 
     try:
         with httpx.Client(base_url=backend.url, timeout=timeout_s) as client:
-            # 1a. Reset backend state before this run (S-Bus: /admin/reset;
-            #     PG-SER adapter exposes the same endpoint for compatibility).
             try:
                 r_reset = client.post("/admin/reset")
-                # 200 = cleared, 403 = admin disabled (harmless for first run)
                 if r_reset.status_code not in (200, 403, 404):
                     log.debug(
                         f"admin/reset -> {r_reset.status_code}: {r_reset.text[:100]}"
@@ -226,8 +142,6 @@ def run_one(task: dict, backend: Backend, n_agents: int, repeat: int,
             except Exception as e:
                 log.debug(f"admin/reset skipped: {e}")
 
-            # 1b. Create shards via admin endpoint (bypasses Raft for speed).
-            #     Falls back to POST /shard if admin is disabled.
             for s in task["shards"]:
                 payload = {
                     "key":      s["key"],
@@ -236,8 +150,6 @@ def run_one(task: dict, backend: Backend, n_agents: int, repeat: int,
                 }
                 r = client.post("/admin/shard", json=payload)
                 if r.status_code in (403, 404, 405):
-                    # admin_enabled=false (S-Bus), or endpoint absent (PG adapter)
-                    # → fall back to the Raft-backed / public endpoint
                     r = client.post("/shard", json=payload)
                 if r.status_code not in (200, 201, 409):
                     raise RuntimeError(
@@ -245,26 +157,21 @@ def run_one(task: dict, backend: Backend, n_agents: int, repeat: int,
                         f"{r.text[:200]}"
                     )
 
-            # 1c. Register sessions (touches delivery log per agent so P1
-            #     replication has something to sync).
             agent_ids = [f"a{i:02d}" for i in range(n_agents)]
             agent_shard = [shard_keys[i % len(shard_keys)] for i in range(n_agents)]
             for aid in agent_ids:
                 try:
                     client.post("/session", json={"agent_id": aid})
                 except Exception:
-                    pass  # /session is best-effort; PG adapter may not implement
+                    pass
 
-            # 2. Drive N agents through `steps` coordination steps.
             for step in range(steps):
-                # Each agent reads own + one sibling shard, then commits own.
                 for ai in range(n_agents):
                     own_key = agent_shard[ai]
                     sib_key = shard_keys[(shard_keys.index(own_key) + 1)
                                           % len(shard_keys)]
                     aid = agent_ids[ai]
 
-                    # GET own (gets current version, records read in DLog)
                     r1 = client.get(
                         f"/shard/{own_key}",
                         params={"agent_id": aid},
@@ -276,7 +183,6 @@ def run_one(task: dict, backend: Backend, n_agents: int, repeat: int,
                     own_state = r1.json()
                     own_version = own_state.get("version", own_state.get("v", 0))
 
-                    # GET sibling (creates cross-shard read-set entry)
                     r2 = client.get(
                         f"/shard/{sib_key}",
                         params={"agent_id": aid},
@@ -288,9 +194,6 @@ def run_one(task: dict, backend: Backend, n_agents: int, repeat: int,
                     sib_state = r2.json()
                     sib_version = sib_state.get("version", sib_state.get("v", 0))
 
-                    # COMMIT own with expected_version = own_version AND
-                    # read_set = [{sibling, version_at_read}] so cross-shard
-                    # validation kicks in.
                     delta = (
                         f"step{step}.agent{ai}.delta: synthetic content, "
                         f"task={task['id']}"
@@ -309,15 +212,12 @@ def run_one(task: dict, backend: Backend, n_agents: int, repeat: int,
 
                     if r3.status_code == 200:
                         res.commits_succeeded += 1
-                        # Type-I check: did it commit at the version we expected?
                         new_state = r3.json()
                         new_version = new_state.get(
                             "new_version",
                             new_state.get("version", new_state.get("v", -1)),
                         )
                         if new_version != own_version + 1:
-                            # Got accepted but version isn't expected_version+1
-                            # → potential corruption signal
                             res.type_i_corruptions += 1
                             log.warning(
                                 f"Type-I signal: {backend.name} {aid} "
@@ -326,14 +226,11 @@ def run_one(task: dict, backend: Backend, n_agents: int, repeat: int,
                             )
                     elif r3.status_code == backend.expected_409_status:
                         res.conflicts_409 += 1
-                        # Conflict detected — the CC mechanism rejected.
-                        # This is the "good path" under contention.
                     else:
                         raise RuntimeError(
                             f"COMMIT {own_key} -> {r3.status_code}: {r3.text[:200]}"
                         )
 
-            # 3. Final state collection.
             for k in shard_keys:
                 r = client.get(
                     f"/shard/{k}",
@@ -355,10 +252,8 @@ def run_one(task: dict, backend: Backend, n_agents: int, repeat: int,
     return res
 
 
-# ── Driver ───────────────────────────────────────────────────────────────
 def planned_runs(tasks: list[dict], backends: list[str],
                  agent_counts: list[int], repeats: int) -> list[tuple]:
-    """Return all (task_idx, backend_name, n_agents, repeat) tuples."""
     plan = []
     for ti, t in enumerate(tasks):
         for b in backends:
@@ -373,7 +268,6 @@ def run_key(task_id: str, backend: str, n: int, r: int) -> str:
 
 
 def load_completed(csv_path: Path) -> set[str]:
-    """Return the set of run keys already in the CSV."""
     if not csv_path.exists():
         return set()
     done = set()
@@ -385,7 +279,6 @@ def load_completed(csv_path: Path) -> set[str]:
 
 
 def append_result(csv_path: Path, res: RunResult) -> None:
-    """Append a single result row to the CSV (creates header if missing)."""
     new_file = not csv_path.exists()
     with csv_path.open("a", newline="") as f:
         w = csv.DictWriter(f, fieldnames=CSV_FIELDS)
@@ -406,7 +299,6 @@ def write_progress(progress_path: Path, completed: int, total: int,
 
 
 def preflight(backends: list[str]) -> bool:
-    """Verify each requested backend is reachable."""
     import httpx
     ok = True
     for bname in backends:
@@ -493,7 +385,6 @@ def main() -> int:
             "isolate by session_id."
         )
 
-    # Sequential execution by default (safest).
     started_overall = time.time()
     done_count = len(completed)
     total = len(plan)
@@ -532,7 +423,6 @@ def analyse(csv_path: Path) -> int:
     rows = list(csv.DictReader(csv_path.open()))
     log.info(f"Loaded {len(rows)} runs from {csv_path}")
 
-    # Summarise by (backend, n_agents)
     print("\n" + "=" * 78)
     print(f"{'Backend':<8} {'N':>3} {'runs':>5} {'attempts':>9} "
           f"{'commits':>9} {'409s':>6} {'corrupt':>8} {'mean_wall':>10}")

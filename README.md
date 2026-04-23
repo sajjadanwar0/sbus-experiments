@@ -1,8 +1,7 @@
 # sbus-experiments
 
 Experimental pipeline for the S-Bus paper
-(*Observable-Read Consistency for Concurrent Multi-Agent LLM State*,
-arXiv 2026, v50.2).
+(*Observable-Read Consistency for Concurrent Multi-Agent LLM State*).
 
 This repository contains the Python harnesses, analysis scripts, and
 seed data needed to reproduce every measurement reported in the paper.
@@ -95,7 +94,7 @@ seed data needed to reproduce every measurement reported in the paper.
 ### Python packages
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 Core: `openai`, `httpx`, `requests`, `psycopg2-binary`. For SDK-comparison
@@ -166,33 +165,25 @@ python3 exp_adversarial_rhidden_v2.py
 ---
 
 ## Reproducing the paper's numbers
-
-Expected total LLM cost for full reproduction: ~$150-250 (gpt-4o-mini worker,
-gpt-4o analyst, Claude Sonnet 4.6 cross-family judge).
-
-Expected wall clock (on AWS Lightsail 2 vCPU, 2 GB):
-- Quick smoke (PH-2 + PH-3 + adversarial): ~8 hours
-- Full paper reproduction: ~3-5 days
-
 ```bash
 # 1. Start backends (see above)
 
 # 2. Run structural validation (fast)
 python3 cross_shard_validation.py
 
-# 3. Run contention scale (~1 hour)
+# 3. Run contention scale
 python3 exp_contention_scale.py --agents 4 8 16 32 64
 
-# 4. Run PH-3 (~7 hours)
+# 4. Run PH-3
 python3 measure_phidden_v2.py --domains all --runs-per-domain 5
 
-# 5. Run validation study (~40 min)
+# 5. Run validation study
 python3 run_llm_judges.py ...
 
-# 6. Run ORI-Isolation (~2 hours)
+# 6. Run ORI-Isolation
 python3 exp_ori_isolation_v2.py
 
-# 7. Run Adversarial-Rhidden (~10 min)
+# 7. Run Adversarial-Rhidden
 python3 exp_adversarial_rhidden_v2.py
 
 # 8. Run PG comparison (requires sbus-baselines; ~2-3 hours)

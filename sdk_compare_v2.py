@@ -1,30 +1,3 @@
-"""
-sdk_compare_v2.py
-=================
-Revised SDK comparison experiment for the S-Bus paper.
-
-Changes from sdk_compare.py v1:
-  1. CI computation uses Student t-distribution for n<30 (fixes z=1.96 with n=5).
-  2. Cross-shard injection events are timestamped so out-of-window injections
-     can be distinguished from missed corruptions (resolves the 29% ambiguity).
-  3. SCR table: n<3 results are reported as empirical range, not CI.
-  4. Ablation runner added (--ablation flag) for Table 11 reproduction.
-  5. SWE-bench baseline CW variance check added to surface templating issues.
-
-Usage
------
-Full paper run (5 tasks, N=4 and N=8, ~2 hours):
-    python3 sdk_compare_v2.py --agents 4 8 --steps 20 --tasks-limit 5 \\
-        --out results/real_sdk_results_v2.csv
-
-Ablation study (Table 11 reproduction):
-    python3 sdk_compare_v2.py --ablation --tasks-limit 3 --ablation-runs 3 \\
-        --out results/ablation_v2.csv
-
-Analyse existing results:
-    python3 sdk_compare_v2.py --analyse-only --out results/real_sdk_results_v2.csv
-"""
-
 import argparse
 import json
 import logging
@@ -36,6 +9,10 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, TypedDict
+import math
+import threading
+import pandas as pd
+from scipy import stats
 
 import importlib.util
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
@@ -56,9 +33,7 @@ _ENC = tiktoken.encoding_for_model("gpt-4o")
 def tok(text: str) -> int:
     return len(_ENC.encode(str(text) or ""))
 
-
 MODEL = "gpt-4o-mini"
-
 
 def get_api_key() -> str:
     key = os.environ.get("OPENAI_API_KEY", "")
@@ -67,16 +42,7 @@ def get_api_key() -> str:
         sys.exit(1)
     return key
 
-
-# ── Statistical helpers ───────────────────────────────────────────────────────
-
 def ci95(values: list[float]) -> float:
-    """95% CI half-width. Uses t-distribution for n<30, z for n>=30.
-
-    This corrects the original sdk_compare.py which used z=1.96 for all n,
-    including n=5 (LangGraph). Correct multiplier for n=5 is t(df=4)=2.776.
-    """
-    import math
     n = len(values)
     if n < 2:
         return 0.0
@@ -84,36 +50,33 @@ def ci95(values: list[float]) -> float:
     var = sum((x - mean) ** 2 for x in values) / (n - 1)
     se = math.sqrt(var / n)
     if n >= 30:
-        t = 1.960  # z approximation
+        t = 1.960
     elif n >= 20:
-        t = 2.093  # t(df=19)
+        t = 2.093
     elif n >= 15:
-        t = 2.145  # t(df=14)
+        t = 2.145
     elif n >= 10:
-        t = 2.262  # t(df=9)
+        t = 2.262
     elif n >= 8:
-        t = 2.365  # t(df=7)
+        t = 2.365
     elif n >= 6:
-        t = 2.571  # t(df=5)
+        t = 2.571
     elif n >= 5:
-        t = 2.776  # t(df=4) — corrected for LangGraph n=5
+        t = 2.776
     elif n >= 4:
-        t = 3.182  # t(df=3)
+        t = 3.182
     elif n >= 3:
-        t = 4.303  # t(df=2)
+        t = 4.303
     else:
-        return 0.0  # n=2: report as range, not CI
+        return 0.0
     return t * se
 
 
 def empirical_range(values: list[float]) -> str:
-    """For n=2 where CI is not meaningful, return [min-max] range string."""
     if len(values) < 2:
         return "—"
     return f"[{min(values):.3f}-{max(values):.3f}]"
 
-
-# ── RunMetrics ────────────────────────────────────────────────────────────────
 
 @dataclass
 class Run:
@@ -130,7 +93,6 @@ class Run:
     wall_ms: int = 0
     model: str = MODEL
     sdk_version: str = ""
-    # New in v2: injection window tracking for cross-shard experiment
     injections_total: int = 0
     injections_in_window: int = 0
     injections_out_of_window: int = 0
@@ -164,11 +126,7 @@ CSV_HDR = (
     "injections_total,injections_in_window,injections_out_of_window,state_corruptions\n"
 )
 
-
-# ── OpenAI helper ─────────────────────────────────────────────────────────────
-
 _oai = None
-
 
 def oai() -> OpenAI:
     global _oai
@@ -196,9 +154,6 @@ def llm_call(sys_msg: str, usr_msg: str, max_tok: int = 350) -> tuple[str, int, 
             else:
                 log.error(f"LLM error: {e}"); return "", 0, 0
     return "", 0, 0
-
-
-# ── S-Bus HTTP client ─────────────────────────────────────────────────────────
 
 class Bus:
     def __init__(self, url="http://localhost:7000"):
@@ -233,11 +188,6 @@ class Bus:
         return r.json()
 
     def commit_v2(self, key, ver, content, agent, read_set: list[dict], note=""):
-        """POST /commit/v2 with sorted-lock-order cross-shard read_set.
-
-        read_set: list of {"key": str, "version": int} dicts.
-        Returns: commit result dict, or {"conflict": True, ...} on version mismatch.
-        """
         r = self.c.post(f"{self.base}/commit/v2", json={
             "key": key, "expected_ver": ver, "content": content,
             "rationale": note, "agent_id": agent,
@@ -268,29 +218,11 @@ def judge_success(outputs: list[str], task: dict) -> bool:
     )
     return verdict.strip().upper().startswith("YES")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SYSTEM 1 — S-Bus
-# ══════════════════════════════════════════════════════════════════════════════
-
 def run_sbus(task: dict, n_agents: int, bus: Bus,
              steps: int, success_steps: int,
              disable_token: bool = False,
              disable_version: bool = False,
              disable_log: bool = False) -> Run:
-    """Run one S-Bus experiment.
-
-    ablation flags disable_token / disable_version / disable_log allow
-    reproducing Table 11 without modifying the Rust server. Instead we
-    simulate the disabled behaviour at the Python harness level:
-
-    - disable_token: don't check for TokenConflict before commit (simulate no owner guard)
-    - disable_version: always send expected_ver=0 (simulate no version check)
-    - disable_log: discard delta log data from stats (doesn't affect ACP)
-
-    Note: true ablation requires server-side changes for full fidelity.
-    This harness-level approximation is suitable for CWR measurement.
-    """
     run = Run(run_id=str(uuid.uuid4()), system="sbus",
               agent_count=n_agents, task_id=task["task_id"],
               sdk_version="rust-sbus-0.1.0")
@@ -346,36 +278,8 @@ def run_sbus(task: dict, n_agents: int, bus: Bus,
     log.info(f"  sbus CWR={run.cwr:.3f} S50={run.success} SCR={run.scr:.3f}")
     return run
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Cross-shard injection experiment with window tracking (fixes 29% ambiguity)
-# ══════════════════════════════════════════════════════════════════════════════
-
 def run_cross_shard_v2(bus: Bus, n_agents: int, n_trials: int = 10,
                         injector_hz: float = 8.0) -> dict:
-    """Reproduce Table 6 with injection-window timestamp tracking.
-
-    Each /commit/v2 call logs:
-      - t_read: when the agent read db_schema version
-      - t_commit: when the /commit/v2 call completed
-
-    The injector logs t_inject for each injection.
-
-    An injection is "in-window" if t_read < t_inject < t_commit.
-    An injection is "out-of-window" if t_inject <= t_read or t_inject >= t_commit.
-
-    Out-of-window injections should NOT be detected (the version was already
-    committed before or read before the injection happened). In-window
-    injections SHOULD be detected as CrossShardStale.
-
-    This resolves the reviewer concern that the ~29% non-detection rate
-    might indicate missed corruptions. Under the sorted-lock-order protocol,
-    the commit critical section has zero duration from the injector's
-    perspective (all locks are held atomically), so in-window injections
-    are detected with certainty.
-    """
-    import threading
-
     results = {
         "injections_total": 0,
         "injections_in_window": 0,
@@ -384,7 +288,7 @@ def run_cross_shard_v2(bus: Bus, n_agents: int, n_trials: int = 10,
         "corruptions": 0,
     }
 
-    inject_times = []  # list of (t_inject, new_version)
+    inject_times = []
     inject_lock = threading.Lock()
     stop_event = threading.Event()
 
@@ -421,7 +325,6 @@ def run_cross_shard_v2(bus: Bus, n_agents: int, n_trials: int = 10,
         for agent_idx in range(n_agents):
             agent = f"agent-{agent_idx}"
             try:
-                # Read dependency shards
                 db_shard = bus.read(db_key)
                 api_shard = bus.read(api_key_s)
                 dep_shard = bus.read(dep_key)
@@ -444,7 +347,6 @@ def run_cross_shard_v2(bus: Bus, n_agents: int, n_trials: int = 10,
                 resp = bus.commit_v2(dep_key, dep_shard["version"], text, agent, read_set)
                 t_commit_end = time.time()
 
-                # Classify injections relative to this commit window
                 with inject_lock:
                     for (t_inj, inj_ver) in inject_times:
                         if t_read <= t_inj <= t_commit_end and inj_ver > db_ver_at_read:
@@ -458,7 +360,6 @@ def run_cross_shard_v2(bus: Bus, n_agents: int, n_trials: int = 10,
             except Exception as e:
                 log.warning(f"Cross-shard trial error: {e}")
 
-        # re-read deploy_plan for next trial
         try:
             dep_shard = bus.read(dep_key)
         except Exception:
@@ -477,11 +378,6 @@ def run_cross_shard_v2(bus: Bus, n_agents: int, n_trials: int = 10,
         f"det_rate(in-window)={det_rate:.1%}"
     )
     return results
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SYSTEM 2 — CrewAI (unchanged from v1, included for completeness)
-# ══════════════════════════════════════════════════════════════════════════════
 
 def run_crewai(task: dict, n_agents: int, steps: int, success_steps: int) -> Run:
     import crewai
@@ -544,11 +440,6 @@ def run_crewai(task: dict, n_agents: int, steps: int, success_steps: int) -> Run
     run.wall_ms = int((time.time() - t0) * 1000)
     log.info(f"  crewai CWR={run.cwr:.3f} S50={run.success}")
     return run
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SYSTEM 3 — AutoGen (unchanged from v1)
-# ══════════════════════════════════════════════════════════════════════════════
 
 def run_autogen(task: dict, n_agents: int, steps: int, success_steps: int) -> Run:
     import autogen_agentchat
@@ -615,11 +506,6 @@ def run_autogen(task: dict, n_agents: int, steps: int, success_steps: int) -> Ru
     run.wall_ms = int((time.time() - t0) * 1000)
     log.info(f"  autogen CWR={run.cwr:.3f} S50={run.success}")
     return run
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SYSTEM 4 — LangGraph (unchanged from v1)
-# ══════════════════════════════════════════════════════════════════════════════
 
 def run_langgraph(task: dict, n_agents: int, steps: int, success_steps: int) -> Run:
     from langgraph.graph import StateGraph, END
@@ -694,21 +580,7 @@ def run_langgraph(task: dict, n_agents: int, steps: int, success_steps: int) -> 
     log.info(f"  langgraph CWR={run.cwr:.3f} S50={run.success}")
     return run
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Ablation runner (Table 11 reproduction)
-# ══════════════════════════════════════════════════════════════════════════════
-
 def run_ablation(tasks: list[dict], bus: Bus, steps: int, n_runs: int, out: Path) -> None:
-    """Reproduce Table 11: ablation study with individual ACP components disabled.
-
-    Conditions:
-      full           — full S-Bus (baseline)
-      no_token       — disable ownership token check (simulate via Python harness)
-      no_version     — disable version check (send expected_ver=0 always)
-      no_log         — delta log disabled (no effect on CWR; confirm via this)
-      no_token_version — disable both token and version checks
-    """
     conditions = [
         ("full",             False, False, False),
         ("no_token",         True,  False, False),
@@ -753,18 +625,7 @@ def run_ablation(tasks: list[dict], bus: Bus, steps: int, n_runs: int, out: Path
                  "no_token_version": "- Token + version"}.get(cname, cname)
         print(f"{label:<22} {mean:>10.3f} {delta:>10} {corruptions[cname]:>8}")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Analysis — corrected CI computation
-# ══════════════════════════════════════════════════════════════════════════════
-
 def analyse(csv_path: Path) -> None:
-    try:
-        import pandas as pd
-        from scipy import stats
-    except ImportError:
-        print("pip install pandas scipy"); return
-
     df = pd.read_csv(csv_path)
     df = df[df["cwr"].apply(lambda x: str(x) != "inf")]
     df["cwr"] = df["cwr"].astype(float)
@@ -829,11 +690,6 @@ def analyse(csv_path: Path) -> None:
         std = math.sqrt(sum((x-mean)**2 for x in cwrs) / max(1, len(cwrs)-1))
         flag = " *** LOW VARIANCE — check baseline templating" if std < 0.005 else ""
         print(f"  CW CWR std={std:.4f}{flag}")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# CLI
-# ══════════════════════════════════════════════════════════════════════════════
 
 def main():
     p = argparse.ArgumentParser()

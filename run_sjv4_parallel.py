@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-run_sjv4_parallel.py — Parallel runner for exp_semantic_judge_v4.py
-"""
-
 import argparse
 import csv
 import glob

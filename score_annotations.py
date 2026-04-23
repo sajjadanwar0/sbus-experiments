@@ -1,30 +1,3 @@
-#!/usr/bin/env python3
-"""
-score_annotations.py
-
-Computes Cohen's kappa between two LLM-judge CSVs produced by
-run_llm_judges.py.
-
-IMPORTANT: This is INTER-MODEL agreement between two LLM judges, not
-human inter-annotator agreement. Report it as such in the paper:
-
-    "Two independently-trained LLM judges (GPT-4o and Claude Sonnet 4.6)
-     labelled each (step, candidate-shard) pair with a frozen prompt.
-     Inter-model Cohen's kappa = X.XX."
-
-Outputs:
-  - Raw agreement rate
-  - Per-label confusion matrix
-  - Cohen's kappa (strict yes/no and lenient 3-class)
-  - Self-report vs LLM-label comparison, treating the agent's self-report
-    as a classifier and each LLM label in turn as (weak) ground truth.
-
-Usage:
-    python3 score_annotations.py gpt4o_labels.csv claude_sonnet_labels.csv
-
-Requires the Python standard library only.
-"""
-
 import csv
 import sys
 
@@ -35,7 +8,6 @@ def load_labels(path):
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Support both new (llm_label) and legacy (human_label) CSVs.
             label = (row.get("llm_label") or row.get("human_label") or "").strip().lower()
             key = (row["row_idx"], row["candidate_shard"])
             out[key] = label
@@ -43,7 +15,6 @@ def load_labels(path):
 
 
 def agent_claim(path):
-    """Return dict: (row_idx, candidate_shard) -> True/False (agent self-report)."""
     out = {}
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -99,8 +70,6 @@ def confusion_matrix(labels_a, labels_b, classes, label_a="A", label_b="B"):
 
 
 def self_report_vs_labels(path_csv, judge_label):
-    """Treat agent self-report as a classifier, LLM label as (weak) ground truth.
-    Returns precision/recall/accuracy of self-report."""
     claim = agent_claim(path_csv)
     labels = load_labels(path_csv)
     keys = [k for k in claim if k in labels and labels[k] in ("yes", "no")]

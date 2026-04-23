@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-exp_session_replication_dr9.py — DR-9: ORI survives leader failover
-Fixes: unique agent IDs per trial, longer Raft wait, uniform CSV fields.
-"""
-
 import os
 import sys
 import time
@@ -26,7 +20,6 @@ NODE_URLS = {
 SBUS_ROOT  = os.getenv("SBUS_ROOT", str(Path.home() / "RustroverProjects/sbus"))
 RESTART_SH = os.path.join(SBUS_ROOT, "restart_node.sh")
 
-# All possible CSV fields — ensures uniform rows even for ERROR cases
 CSV_FIELDS = ["trial","status","ori_held","alpha1_http","alpha1_error",
               "v0","election_ms","killed_node","new_leader","wall_secs",
               "timestamp","reason"]
@@ -34,7 +27,6 @@ CSV_FIELDS = ["trial","status","ori_held","alpha1_http","alpha1_error",
 def empty_row(trial_id):
     return {f: "" for f in CSV_FIELDS} | {"trial": trial_id, "timestamp": datetime.now(timezone.utc).isoformat()}
 
-# ── Leader detection ──────────────────────────────────────────────────────────
 def get_leader():
     for nid, url in NODE_URLS.items():
         try:
@@ -72,12 +64,10 @@ def wait_for_new_leader(old_id, timeout=10.0):
         time.sleep(0.2)
     return None, None
 
-# ── Node control ──────────────────────────────────────────────────────────────
 def node_port(nid):
     return int(NODE_URLS[nid].rstrip("/").split(":")[-1])
 
 def kill_node(nid):
-    """Kill only the server LISTENING on this port — NOT Python client connections."""
     port = node_port(nid)
     subprocess.run(
         ["bash", "-c",
@@ -88,7 +78,7 @@ def kill_node(nid):
 
 def restart_node(nid):
     if not os.path.exists(RESTART_SH):
-        print(f"\n  ⚠  {RESTART_SH} not found")
+        print(f"\n  {RESTART_SH} not found")
         return False
     r = subprocess.run(
         ["bash", RESTART_SH, str(nid), SBUS_ROOT],
@@ -109,14 +99,12 @@ def node_is_up(nid, timeout=10.0):
     return False
 
 def register_session(url, agent_id):
-    """Create a fresh session (empty DeliveryLog) for this agent."""
     try:
         requests.post(f"{url}/session",
                       json={"agent_id": agent_id}, timeout=3)
     except Exception:
         pass
 
-# ── S-Bus operations ──────────────────────────────────────────────────────────
 def do_create(url, key):
     r = requests.post(f"{url}/shard",
         json={"key": key, "content": "dr9_initial", "goal_tag": "dr9"}, timeout=5)
@@ -134,44 +122,34 @@ def do_commit(url, key, ver, agent, delta):
               "delta": delta, "agent_id": agent}, timeout=5)
     return r.status_code, r.json()
 
-# ── Single trial ──────────────────────────────────────────────────────────────
 def run_trial(trial_id):
     t0 = time.time()
     row = empty_row(trial_id)
-
-    # Unique per-trial shard key AND agent IDs
-    # Agent IDs are unique to avoid stale DeliveryLog entries from prior trials
     key    = f"dr9_t{trial_id}_{int(t0*1000) % 999999}"
     alpha1 = f"dr9_alpha1_t{trial_id}"
     alpha2 = f"dr9_alpha2_t{trial_id}"
 
-    # Find leader
     leader_id, leader_url = wait_for_leader(timeout=10)
     if leader_id is None:
         return row | {"status": "ERROR", "reason": "no_leader_at_start"}
 
-    # Register fresh sessions for both agents on the leader
     register_session(leader_url, alpha1)
     register_session(leader_url, alpha2)
 
-    # Create shard via Raft (replicated to all nodes)
     do_create(leader_url, key)
-    time.sleep(1.5)  # wait for Raft replication to all nodes
+    time.sleep(1.5)
 
-    # α1 GETs shard → DeliveryLog entry replicated via P1
     try:
         v0 = do_get(leader_url, key, alpha1)
     except Exception as e:
         return row | {"status": "ERROR", "reason": f"alpha1_get:{e}"}
 
-    time.sleep(0.6)  # allow Raft DeliveryEntry to replicate
+    time.sleep(0.6)
 
-    # Kill leader
     kill_t = time.time()
     killed_id = leader_id
     kill_node(killed_id)
 
-    # Wait for new leader
     new_id, new_url = wait_for_new_leader(killed_id, timeout=10)
     election_ms = (time.time() - kill_t) * 1000
 
@@ -181,10 +159,8 @@ def run_trial(trial_id):
         return row | {"status": "ERROR", "reason": "no_new_leader",
                       "election_ms": round(election_ms)}
 
-    # Register alpha2 session on new leader
     register_session(new_url, alpha2)
 
-    # α2 bumps version on new leader: v0 → v1
     try:
         v_cur = do_get(new_url, key, alpha2)
         sc2, r2 = do_commit(new_url, key, v_cur, alpha2, "alpha2_update")
@@ -200,9 +176,6 @@ def run_trial(trial_id):
         return row | {"status": "ERROR", "reason": f"alpha2:{e}",
                       "election_ms": round(election_ms)}
 
-    # α1 commits with stale v0 (shard now at v1)
-    # With P1:    new leader has DLog[alpha1]→(key, v0) → detects stale → 409 ✅
-    # Without P1: empty DLog → no check → 200 ❌
     try:
         sc1, r1 = do_commit(new_url, key, v0, alpha1, "alpha1_stale")
     except Exception as e:
@@ -213,7 +186,6 @@ def run_trial(trial_id):
 
     ori_held = (sc1 == 409)
 
-    # Restart killed node → back to 3-node cluster
     restart_node(killed_id)
     node_is_up(killed_id, timeout=12)
     time.sleep(2.0)  # Raft catch-up
@@ -230,7 +202,6 @@ def run_trial(trial_id):
         "wall_secs":    round(time.time() - t0, 1),
     }
 
-# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n-trials", type=int, default=30)
@@ -273,7 +244,6 @@ def main():
                   f"killed=Node{r['killed_node']}→Node{r['new_leader']}  "
                   f"wall={r['wall_secs']:.0f}s")
 
-    # Write CSV — all rows have identical fields
     with open(args.output, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         writer.writeheader()

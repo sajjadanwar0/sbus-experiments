@@ -1,23 +1,3 @@
-#!/usr/bin/env python3
-"""
-pg_rc_sfu.py — Fair PostgreSQL Baseline: READ COMMITTED + SELECT FOR UPDATE
-
-Addresses DeepSeek reviewer concern: "Fair comparison = S-Bus semantics in SQL
-= SELECT FOR UPDATE on exact keys (not full SERIALIZABLE predicate locks)."
-
-PostgreSQL SERIALIZABLE uses predicate locks that span the whole table scan,
-causing false-positive SCR=0.51-0.75 on distinct shards.
-READ COMMITTED + SELECT FOR UPDATE uses row-level locks only on exact keys —
-semantically equivalent to S-Bus per-key OCC.
-
-Expected: SCR≈0.000 on distinct shards (same as S-Bus), confirming
-per-key OCC is the common mechanism.
-
-Run:
-    # Add READ COMMITTED mode to pg_sbus_server.py as /commit/v2_rc endpoint
-    # Then run:
-    python3 pg_rc_sfu.py --url http://localhost:7001 --out results/pg_rc_sfu.csv
-"""
 import argparse
 import csv
 import os
@@ -53,7 +33,6 @@ def get_ver(key):
     return r.json().get("version",0) if r.status_code==200 else 0
 
 def commit_rc(key, ver, delta, agent_id):
-    """Use /commit/v2_rc endpoint (READ COMMITTED + SELECT FOR UPDATE)."""
     r = client.post("/commit/v2_rc", json={
         "key":key,"expected_version":ver,"delta":delta,"agent_id":agent_id
     })
@@ -113,5 +92,5 @@ if __name__=="__main__":
     os.makedirs("results",exist_ok=True)
     with open(args.out,"w",newline="") as f:
         w = csv.DictWriter(f,fieldnames=rows[0].keys()); w.writeheader(); w.writerows(rows)
-    print(f"\n✅ Saved: {args.out}")
+    print(f"\n Saved: {args.out}")
     print("Expected: distinct SCR≈0.000 (per-key OCC, no predicate locks)")

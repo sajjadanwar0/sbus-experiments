@@ -1,48 +1,3 @@
-#!/usr/bin/env python3
-"""
-Exp SJ-v5 (PARALLEL): Stale Agent Fraction Dose-Response — Parallelised
-=========================================================================
-Runs all 1,000 trial units (10 tasks × 25 runs × 4 stale conditions)
-concurrently using a ThreadPoolExecutor.
-
-WHY THIS IS SAFE TO PARALLELISE
----------------------------------
-Each trial (task × run_idx × n_stale) is completely independent:
-  - Creates unique shard keys via uuid run_id → no S-Bus key collisions
-  - Creates unique agent_ids with run_id suffix → no session collisions
-  - OpenAI client is stateless/thread-safe → no API client collisions
-  - CSV writes use a lock → no file corruption
-  - admin/reset is NOT called per-run (would break concurrent runs)
-    Instead each run creates its own isolated shards
-
-WORKERS GUIDE
--------------
-  --workers 4  : safe for OpenAI tier 1 (500 RPM), ~6 hours for full run
-  --workers 8  : safe for OpenAI tier 2 (5,000 RPM), ~3 hours
-  --workers 12 : aggressive, tier 2 only, ~2 hours
-  --workers 16 : max practical (S-Bus connection pool limit), ~1.5 hours
-
-USAGE
-------
-  # Quick test (5 tasks × 10 runs × 4 conditions = 200 trials, ~30 min at W=8)
-  python3 exp_sjv5_parallel.py \
-    --n-tasks 5 --n-runs 10 --n-steps 15 --workers 8
-
-  # Full paper run (10 tasks × 25 runs × 4 conditions = 1000 trials, ~3h at W=8)
-  python3 exp_sjv5_parallel.py \
-    --n-tasks 10 --n-runs 25 --n-steps 20 --workers 8 \
-    --output results/sjv5_parallel.csv
-
-  # Replicate SJ-v4 (conditions 0 and 1 only, 20 tasks × 25 runs = 1000 trials)
-  python3 exp_sjv5_parallel.py \
-    --n-tasks 20 --n-runs 25 --stale-counts 0 1 --workers 8
-
-REQUIRES
----------
-  SBUS_ADMIN_ENABLED=1 cargo run --release
-  pip install openai anthropic
-"""
-
 import csv
 import json
 import os
@@ -57,6 +12,7 @@ from dataclasses import dataclass, asdict
 from urllib.request import Request, ProxyHandler, build_opener
 from urllib.parse import urlencode
 from urllib.error import HTTPError
+from scipy import stats as scipy_stats
 
 try:
     from openai import OpenAI
@@ -69,14 +25,11 @@ try:
 except ImportError:
     HAS_ANTHROPIC = False
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-
 SBUS_URL    = os.getenv("SBUS_URL", "http://localhost:7000")
 BACKBONE    = "gpt-4o-mini"
 JUDGE_MODEL = "claude-haiku-4-5-20251001"
 N_AGENTS    = 4
 
-# Tasks from SJ-v4 (cumulative-state sensitive)
 SJV5_TASKS = [
     {"id": "sympy_algebraic",     "desc": "Fix SymPy solve() dropping solutions with positive assumptions. Agents coordinate changes to solve_engine, assumption_system, simplification, solution_filter.", "shards": ["solve_engine", "assumption_system", "simplification", "solution_filter"]},
     {"id": "django_migration",    "desc": "Fix Django migration squasher for circular RunSQL dependencies. Agents update migration_graph, squash_plan, dependency_resolver, rollback_state.", "shards": ["migration_graph", "squash_plan", "dependency_resolver", "rollback_state"]},
@@ -100,14 +53,7 @@ SJV5_TASKS = [
     {"id": "django_cache",        "desc": "Fix Django cache framework key generation for multi-database setups. Agents update cache_backend, key_generator, database_router, invalidation.", "shards": ["cache_backend", "key_generator", "database_router", "invalidation"]},
 ]
 
-# ── Rate limiter ───────────────────────────────────────────────────────────────
-
 class RateLimiter:
-    """
-    Token-bucket rate limiter to avoid OpenAI RPM limits.
-    Default: 400 requests/min (conservative for tier 1: 500 RPM).
-    For tier 2 (5,000 RPM), use rpm=4000.
-    """
     def __init__(self, rpm: int = 400):
         self._interval = 60.0 / rpm
         self._last     = 0.0
@@ -121,8 +67,6 @@ class RateLimiter:
                 time.sleep(wait)
             self._last = time.monotonic()
 
-
-# ── HTTP helpers (thread-safe: each call creates its own opener) ───────────────
 
 def _make_opener():
     return build_opener(ProxyHandler({}))
@@ -158,9 +102,6 @@ def health_check() -> bool:
         return False
     st, _ = http_get(f"{SBUS_URL}/stats")
     return st == 200
-
-
-# ── Judge ─────────────────────────────────────────────────────────────────────
 
 JUDGE_PROMPT = """
 You are evaluating MULTI-AGENT collaborative incremental contributions.
@@ -216,9 +157,6 @@ def judge(task_desc: str, content: str, oai: OpenAI, rate_limiter: RateLimiter) 
         v = "INCOMPLETE"
     return v, lines[1].strip() if len(lines) > 1 else ""
 
-
-# ── Core trial runner ─────────────────────────────────────────────────────────
-
 @dataclass
 class TrialResult:
     run_id:            str
@@ -248,18 +186,12 @@ def run_trial(
     n_steps:        int,
     injection_step: int,
 ) -> TrialResult:
-    """
-    One independent trial: (task, run_idx, n_stale).
-    Creates its own isolated shards via unique run_id.
-    Safe to run concurrently with any other trial.
-    """
     run_id = uuid.uuid4().hex[:8]
     shards = [f"{sk}_{run_id}" for sk in task["shards"]]
     agents = [f"agent_{i}_{run_id}" for i in range(N_AGENTS)]
 
     t0 = time.perf_counter()
 
-    # Create shards (no reset — each run owns its own keys)
     for sk in shards:
         http_post(f"{SBUS_URL}/shard", {
             "key":      sk,
@@ -269,7 +201,6 @@ def run_trial(
     for a in agents:
         http_post(f"{SBUS_URL}/session", {"agent_id": a, "session_ttl": 3600})
 
-    # Capture stale snapshot at step 0
     stale_snapshots = {}
     for sk in shards:
         _, data = http_get(f"{SBUS_URL}/shard/{sk}", {"agent_id": "snap"})
@@ -284,11 +215,9 @@ def run_trial(
         for agent in agents:
             target = shards[step % len(shards)]
 
-            # Get current version for commit
             _, cur_data = http_get(f"{SBUS_URL}/shard/{target}", {"agent_id": agent})
             cur_ver = cur_data.get("version", 0) if cur_data else 0
 
-            # Build context
             if agent in stale_agents and step >= injection_step:
                 context = "\n".join(
                     f"  {sk}: {stale_snapshots[sk][:80]} [FROZEN step-0]"
@@ -304,7 +233,6 @@ def run_trial(
                             f"{sdata.get('content','')[:80]}")
                 context = "\n".join(parts)
 
-            # LLM call (rate-limited)
             try:
                 rate_limiter.acquire()
                 resp = oai.chat.completions.create(
@@ -319,7 +247,6 @@ def run_trial(
             except Exception as e:
                 delta = f"[{agent} s{step}] ERROR: {e}"
 
-            # Commit at current version (stale context passes structural check)
             st, _ = http_post(f"{SBUS_URL}/commit/v2", {
                 "key":              target,
                 "expected_version": cur_ver,
@@ -331,7 +258,6 @@ def run_trial(
             if st == 200:
                 commits_ok += 1
 
-    # Collect final state
     final_parts = []
     for sk in shards:
         _, fdata = http_get(f"{SBUS_URL}/shard/{sk}", {"agent_id": "judge"})
@@ -362,16 +288,12 @@ def run_trial(
     )
 
 
-# ── Thread-safe progress printer ──────────────────────────────────────────────
-
 _print_lock = threading.Lock()
 
 def tprint(*args, **kwargs):
     with _print_lock:
         print(*args, **kwargs)
 
-
-# ── Thread-safe CSV writer ────────────────────────────────────────────────────
 
 class CSVWriter:
     def __init__(self, path: str):
@@ -393,8 +315,6 @@ class CSVWriter:
         with self._lock:
             self._file.close()
 
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
@@ -424,14 +344,12 @@ def main():
     if not HAS_ANTHROPIC:
         print("NOTE: anthropic not installed — using GPT-4o-mini as judge")
 
-    # Shared (thread-safe) objects
     oai          = OpenAI(api_key=api_key)
     rate_limiter = RateLimiter(rpm=args.rpm)
     csv_writer   = CSVWriter(args.output)
 
     tasks = SJV5_TASKS[:args.n_tasks]
 
-    # Build ALL work units upfront
     work_units = [
         (task, run_idx, n_stale)
         for task    in tasks
@@ -440,11 +358,10 @@ def main():
     ]
     total = len(work_units)
 
-    # Counters (thread-safe via lock)
     counts_lock = threading.Lock()
     counts = {k: {"correct": 0, "corrupted": 0, "incomplete": 0, "total": 0}
               for k in args.stale_counts}
-    done_count = [0]   # mutable int via list
+    done_count = [0]
 
     print("=" * 70)
     print("Exp SJ-v5 PARALLEL: Stale Agent Fraction Dose-Response")
@@ -456,7 +373,6 @@ def main():
     print(f"Steps/trial  : {args.n_steps}  |  Injection at step: {args.injection_step}")
     print()
 
-    # Estimate time
     calls_per_trial = N_AGENTS * args.n_steps + 1  # agents + judge
     serial_secs     = total * calls_per_trial * (60 / args.rpm)
     parallel_secs   = serial_secs / args.workers
@@ -494,8 +410,7 @@ def main():
                 done_count[0] += 1
                 n_done = done_count[0]
 
-            # Progress dot with periodic summary line
-            symbol = "✓" if result.is_correct else ("✗" if result.is_corrupted else "·")
+            symbol = "passed" if result.is_correct else ("failed" if result.is_corrupted else "·")
             with _print_lock:
                 print(symbol, end="", flush=True)
                 if n_done % 50 == 0:
@@ -516,7 +431,7 @@ def main():
         futures = {pool.submit(_run_unit, unit): unit for unit in work_units}
         try:
             for _ in as_completed(futures):
-                pass   # progress printed inside _run_unit
+                pass
         except KeyboardInterrupt:
             print("\n\nInterrupted — saving partial results...")
             pool.shutdown(wait=False, cancel_futures=True)
@@ -531,9 +446,6 @@ def main():
     _print_final_summary(counts, args)
     _run_stats(args.output, args.stale_counts)
     print(f"\nResults: {args.output}")
-
-
-# ── Summary helpers ───────────────────────────────────────────────────────────
 
 def _print_live_summary(counts: dict, stale_counts: list) -> None:
     parts = []
@@ -565,7 +477,7 @@ def _print_final_summary(counts: dict, args) -> None:
         corr = c["corrupted"] / t
         c["incomplete"] / t
         rates[k] = s50
-        bar = "█" * int(s50 * 30) + "░" * (30 - int(s50 * 30))
+        bar = "" * int(s50 * 30) + "" * (30 - int(s50 * 30))
         print(f"  {k}/{N_AGENTS} stale ({k*25:3d}%): "
               f"n={t:4d} | S@50={s50*100:5.1f}% [{bar}]"
               f" | corrupt={corr*100:4.1f}%")
@@ -581,7 +493,6 @@ def _print_final_summary(counts: dict, args) -> None:
             arrow = "↑" if diff > 0.01 else ("↓" if diff < -0.01 else "≈")
             print(f"    k={k}: {diff*100:+.1f}pp  {arrow}")
 
-        # U-shape check
         if all(k in rates for k in [0, 1, 2, 3]):
             r0, r1, r2, r3 = rates[0], rates[1], rates[2], rates[3]
             if r1 >= r0 and r3 < r1:
@@ -595,13 +506,6 @@ def _print_final_summary(counts: dict, args) -> None:
             print()
             print(f"  Shape: {shape}")
 
-    print()
-    print("  PAPER TEXT (copy-paste ready for §7.8):")
-    print()
-    print("  \\textbf{Exp.~SJ-v5 (stale fraction dose-response)}.")
-    print(f"  ({args.n_tasks} tasks, {args.n_runs} runs/condition,")
-    print(f"  {N_AGENTS} agents, {args.n_steps} steps; stale injection at step {5}):")
-    print()
     for k in sorted(args.stale_counts):
         c = counts.get(k, {"correct": 0, "total": 0})
         t = c["total"]
@@ -611,12 +515,6 @@ def _print_final_summary(counts: dict, args) -> None:
 
 
 def _run_stats(csv_path: str, stale_counts: list) -> None:
-    try:
-        from scipy import stats as scipy_stats
-    except ImportError:
-        print("\nNOTE: pip install scipy for Fisher's exact tests")
-        return
-
     rows = []
     try:
         with open(csv_path) as f:
@@ -655,7 +553,6 @@ def _run_stats(csv_path: str, stale_counts: list) -> None:
         print(f"    k={k}: {ck}/{nk} = {ck/nk*100:.1f}%  |  "
               f"Δ={d*100:+.1f}pp  |  Fisher p={p:.4f}  {sig}")
 
-    # Pairwise: 1 vs 3 (diversity peak vs high stale)
     c1, nc1, n1 = get_counts(1)
     c3, nc3, n3 = get_counts(3)
     if n1 > 0 and n3 > 0:

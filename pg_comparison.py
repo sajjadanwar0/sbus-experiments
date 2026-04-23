@@ -1,48 +1,3 @@
-#!/usr/bin/env python3
-"""
-L8 — Fair PostgreSQL Token Comparison
-======================================
-Implements LangGraph-over-PostgreSQL using SERIALIZABLE isolation
-and runs identical 30-task experiments against S-Bus, comparing
-total tokens (not just correctness) for a fair cost/benefit analysis.
-
-SETUP:
-    pip install psycopg2-binary openai anthropic
-    # PostgreSQL must be running:
-    # macOS:  brew install postgresql && brew services start postgresql
-    # Ubuntu: sudo apt install postgresql && sudo systemctl start postgresql
-
-    # Create the database:
-    psql -U postgres -c "CREATE DATABASE sbus_pg;"
-    psql -U postgres -d sbus_pg -c "
-      CREATE TABLE IF NOT EXISTS shards (
-        key TEXT PRIMARY KEY,
-        version BIGINT NOT NULL DEFAULT 0,
-        content TEXT,
-        goal_tag TEXT,
-        updated_at TIMESTAMPTZ DEFAULT now()
-      );"
-
-    export OPENAI_API_KEY=...
-    export PG_DSN=postgresql://postgres:password@localhost/sbus_pg
-    cargo run --release   # S-Bus on port 7000
-
-RUN:
-    python3 pg_comparison.py --tasks 10 --output pg_comparison_results.csv
-
-WHAT IT SHOWS:
-    LangGraph-PG: lower total tokens (supervisor condenses context)
-                  higher wall time (supervisor serialises at each step)
-                  same zero corruptions as S-Bus (SERIALIZABLE isolation)
-
-    S-Bus:        higher total tokens (N agents × full context each)
-                  lower wall time (true parallel execution)
-                  same zero corruptions
-
-This quantifies the exact trade-off: S-Bus pays more tokens for parallelism;
-LangGraph-PG pays more time for token efficiency.
-"""
-
 import os
 import sys
 import csv
@@ -60,7 +15,7 @@ openai_client = AsyncOpenAI()
 PG_DSN   = os.getenv("PG_DSN", "postgresql://postgres@localhost/sbus_pg")
 SBUS_URL = os.getenv("SBUS_URL", "http://localhost:7000")
 MODEL    = "gpt-4o-mini"
-N_STEPS  = 20   # shorter for cost control
+N_STEPS  = 20
 N_AGENTS = 4
 
 TASKS = [
@@ -70,10 +25,7 @@ TASKS = [
                 "11115","11133","11166","11179","11283"]
 ]
 
-# ── PostgreSQL shard state backend ────────────────────────────────────────────
 class PGShardBackend:
-    """Implements the same API as S-Bus but backed by PostgreSQL SERIALIZABLE."""
-
     def __init__(self, dsn: str):
         self.conn = psycopg2.connect(dsn)
         self.conn.autocommit = False
@@ -99,10 +51,8 @@ class PGShardBackend:
         return {"key": row[0], "version": row[1], "content": row[2]} if row else None
 
     def commit_delta(self, key: str, expected_version: int, delta: str) -> bool:
-        """SERIALIZABLE OCC: update only if version matches (no phantom reads)."""
         try:
             with self.conn.cursor() as cur:
-                # SET TRANSACTION ISOLATION LEVEL SERIALIZABLE prevents all anomalies
                 cur.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
                 cur.execute(
                     "UPDATE shards SET content=%s, version=version+1, updated_at=now() "
@@ -123,14 +73,8 @@ class PGShardBackend:
     def close(self):
         self.conn.close()
 
-# ── LangGraph-PG agent (supervisor pattern) ───────────────────────────────────
 async def run_langgraph_pg(task: dict, pg: PGShardBackend,
                            shard_key: str, n_agents: int) -> dict:
-    """
-    Simulates LangGraph's supervisor condensation pattern over PostgreSQL.
-    Each step: supervisor reads all agents' output → condenses → writes.
-    This is the token-efficient but sequentialised approach.
-    """
     coord_tokens = 0
     work_tokens  = 0
     commits      = 0
@@ -138,7 +82,6 @@ async def run_langgraph_pg(task: dict, pg: PGShardBackend,
     t0 = time.time()
 
     for step in range(N_STEPS):
-        # Worker phase: N agents each generate output (work tokens)
         worker_outputs = []
         for i in range(n_agents):
             shard = pg.read_shard(shard_key)
@@ -157,7 +100,6 @@ async def run_langgraph_pg(task: dict, pg: PGShardBackend,
             except Exception:
                 worker_outputs.append(f"[worker {i} error]")
 
-        # Supervisor phase: reads all worker outputs → condenses → writes (coord tokens)
         supervisor_input = "\n".join(f"Worker {i}: {o}" for i, o in enumerate(worker_outputs))
         sup_messages = [{"role": "user", "content":
             f"Condense these {n_agents} agent outputs into one coherent update:\n"
@@ -170,7 +112,6 @@ async def run_langgraph_pg(task: dict, pg: PGShardBackend,
         except Exception:
             condensed = worker_outputs[0] if worker_outputs else ""
 
-        # Write condensed output via PG SERIALIZABLE
         shard = pg.read_shard(shard_key)
         ev = shard["version"] if shard else 0
         if pg.commit_delta(shard_key, ev, condensed):
@@ -187,12 +128,10 @@ async def run_langgraph_pg(task: dict, pg: PGShardBackend,
         "commits": commits, "conflicts": conflicts,
         "scr": conflicts / (commits + conflicts) if (commits + conflicts) > 0 else 0,
         "wall_ms": int((time.time() - t0) * 1000),
-        "corruptions": 0  # SERIALIZABLE prevents all Type-I
+        "corruptions": 0
     }
 
-# ── S-Bus agent ───────────────────────────────────────────────────────────────
 async def run_sbus(task: dict, shard_key: str, n_agents: int) -> dict:
-    """S-Bus parallel execution — N agents run concurrently."""
     t0 = time.time()
     coord_tokens = 0
     work_tokens  = 0
@@ -243,7 +182,6 @@ async def run_sbus(task: dict, shard_key: str, n_agents: int) -> dict:
         "corruptions": 0
     }
 
-# ── Main ──────────────────────────────────────────────────────────────────────
 async def main():
     parser = argparse.ArgumentParser(description="L8: PostgreSQL fair comparison")
     parser.add_argument("--tasks", type=int, default=5, help="Number of tasks (max 10)")
@@ -251,7 +189,6 @@ async def main():
     parser.add_argument("--output", default="pg_comparison_results.csv")
     args = parser.parse_args()
 
-    # Check dependencies
     pg_dsn = os.environ.get("PG_DSN", PG_DSN)
     try:
         pg_test = psycopg2.connect(pg_dsn)
@@ -280,12 +217,10 @@ async def main():
         shard_key_pg   = f"pg_{task['task_id'].replace('__','_')}_{run_id}"
         shard_key_sbus = f"sb_{task['task_id'].replace('__','_')}_{run_id}"
 
-        # Init PG shard
         pg = PGShardBackend(pg_dsn)
         pg.create_shard(shard_key_pg,
                         f"Initial: {task['description']}", "pg_comparison")
 
-        # Init S-Bus shard
         async with httpx.AsyncClient(timeout=10.0) as http:
             await http.post(f"{SBUS_URL}/shard", json={
                 "key": shard_key_sbus,
@@ -293,7 +228,6 @@ async def main():
                 "goal_tag": "pg_comparison"
             })
 
-        # Run both systems
         print("  Running LangGraph-PG...", end=" ", flush=True)
         pg_result = await run_langgraph_pg(task, pg, shard_key_pg, args.agents)
         print(f"tokens={pg_result['total_tokens']:,} wall={pg_result['wall_ms']//1000}s")
@@ -310,13 +244,11 @@ async def main():
             res["n_agents"] = args.agents
             all_results.append(res)
 
-    # Write CSV
     with open(args.output, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(all_results[0].keys()))
         writer.writeheader()
         writer.writerows(all_results)
 
-    # Summary
     pg_rows = [r for r in all_results if r["system"] == "langgraph_pg"]
     sb_rows = [r for r in all_results if r["system"] == "sbus"]
 

@@ -1,26 +1,3 @@
-#!/usr/bin/env python3
-"""
-run_llm_judges.py
-
-Runs two independent LLM judges (GPT-4o and Claude Sonnet 4.6) over the
-PH-3 annotation tasks and produces two CSV files of labels. The resulting
-CSVs are consumed by score_annotations.py to compute inter-model
-agreement (reported in the paper as inter-LLM kappa, NOT human IAA).
-
-Column naming reflects this: the label column is `llm_label`.
-
-Usage:
-    python3 run_llm_judges.py                  # full run (2 * 400 calls)
-    python3 run_llm_judges.py --pilot 50       # 50-row pilot first
-    python3 run_llm_judges.py --resume         # skip rows already in both CSVs
-
-Environment:
-    OPENAI_API_KEY      required
-    ANTHROPIC_API_KEY   required
-
-Dependencies:
-    pip install openai anthropic
-"""
 
 import argparse
 import concurrent.futures
@@ -33,9 +10,6 @@ import time
 import anthropic
 from openai import OpenAI
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
 openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 anthropic_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -50,7 +24,7 @@ CSV_B = f"{MODEL_B_SHORT}_labels.csv"
 
 MAX_CONCURRENT_THREADS = 10
 MAX_RETRIES = 3
-RETRY_BASE_WAIT = 2.0  # seconds; exponential
+RETRY_BASE_WAIT = 2.0
 
 CSV_HEADERS = [
     "row_idx", "run_id", "domain", "task_id", "step",
@@ -58,9 +32,6 @@ CSV_HEADERS = [
     "reasoning", "agent_said_used_it",
 ]
 
-# ---------------------------------------------------------------------------
-# Prompt (frozen — do NOT tune to hit a kappa target)
-# ---------------------------------------------------------------------------
 PROMPT_TEMPLATE = """You are a strict code auditor. Decide whether the Candidate Shard provided content that the agent demonstrably needed to produce the Code Change.
 
 DECISION PROCEDURE (apply in order; stop at the first that fires):
@@ -104,9 +75,6 @@ Step: <1|2|3>
 <label>Yes</label> or <label>No</label>
 """
 
-# ---------------------------------------------------------------------------
-# Parsing
-# ---------------------------------------------------------------------------
 LABEL_RE = re.compile(r"<label>\s*(Yes|No)\s*</label>", re.IGNORECASE)
 EVIDENCE_RE_QUOTED = re.compile(r'Evidence:\s*"([^"]*)"', re.IGNORECASE)
 EVIDENCE_RE_PLAIN = re.compile(r"Evidence:\s*(.+?)(?:\n|$)", re.IGNORECASE)
@@ -114,7 +82,6 @@ STEP_RE = re.compile(r"Step:\s*([123])", re.IGNORECASE)
 
 
 def extract_fields(text: str):
-    """Return (label, evidence, step_reached, full_reasoning)."""
     label_m = LABEL_RE.search(text)
     if label_m:
         label = label_m.group(1).strip().lower()
@@ -133,19 +100,16 @@ def extract_fields(text: str):
     return label, evidence, step_reached, reasoning
 
 
-# ---------------------------------------------------------------------------
-# API wrappers with retry
-# ---------------------------------------------------------------------------
 def _with_retry(fn, *args, **kwargs):
     last_err = None
     for attempt in range(MAX_RETRIES):
         try:
             return fn(*args, **kwargs)
-        except Exception as e:  # noqa: BLE001 — want to retry everything
+        except Exception as e:
             last_err = e
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_BASE_WAIT ** (attempt + 1))
-    raise last_err  # type: ignore[misc]
+    raise last_err
 
 
 def call_openai(prompt: str) -> str:
@@ -172,9 +136,6 @@ def call_claude(prompt: str) -> str:
     return _with_retry(_do)
 
 
-# ---------------------------------------------------------------------------
-# Per-row processing
-# ---------------------------------------------------------------------------
 def process_single_row(task: dict):
     prompt = PROMPT_TEMPLATE.format(
         change=task["change"],
@@ -185,13 +146,13 @@ def process_single_row(task: dict):
     try:
         a_text = call_openai(prompt)
         a_label, a_evidence, a_step, a_reasoning = extract_fields(a_text)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         a_label, a_evidence, a_step, a_reasoning = "no", "NONE", "", f"API Error: {e}"
 
     try:
         b_text = call_claude(prompt)
         b_label, b_evidence, b_step, b_reasoning = extract_fields(b_text)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         b_label, b_evidence, b_step, b_reasoning = "no", "NONE", "", f"API Error: {e}"
 
     agent_claim = "yes" if task.get("agent_said_used_it", False) else "no"
@@ -211,9 +172,6 @@ def process_single_row(task: dict):
     return task["row_idx"], row_a, row_b
 
 
-# ---------------------------------------------------------------------------
-# Resume support
-# ---------------------------------------------------------------------------
 def load_processed_keys(csv_path: str):
     if not os.path.exists(csv_path):
         return set()
@@ -225,9 +183,6 @@ def load_processed_keys(csv_path: str):
     return keys
 
 
-# ---------------------------------------------------------------------------
-# Orchestration
-# ---------------------------------------------------------------------------
 def process_tasks(pilot_n: int | None = None, resume: bool = False):
     with open(INPUT_JSON, "r", encoding="utf-8") as f:
         tasks = json.load(f)

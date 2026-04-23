@@ -1,31 +1,3 @@
-#!/usr/bin/env python3
-"""
-L5 — Full Backbone Generalisation (30 Tasks Each)
-==================================================
-Runs the existing SWE-bench experiment harness across Claude Haiku
-and Llama-3.1-8B backbones, each on the full 30-task dataset.
-
-SETUP:
-    export OPENAI_API_KEY=...        # for judge (GPT-4o-mini)
-    export ANTHROPIC_API_KEY=...     # for Haiku backbone
-    export GROQ_API_KEY=...          # for Llama backbone (free at groq.com)
-    cargo run --release              # S-Bus server on port 7000
-
-RUN HAIKU (recommended first — same codebase, different backbone):
-    python3 backbone_replication.py --backbone haiku --output results/haiku_30tasks.csv
-
-RUN LLAMA (free via Groq):
-    python3 backbone_replication.py --backbone llama --output results/llama_30tasks.csv
-
-RUN BOTH:
-    python3 backbone_replication.py --backbone both
-
-WHAT THIS PRODUCES:
-    CSV with columns: run_id, system, agent_count, task_id, backbone_model,
-                      coord_tokens, work_tokens, cwr, success, wall_ms, scr
-    Import into your main results and compute U=0 test per (N, comparison) pair.
-"""
-
 import os
 import sys
 import json
@@ -39,7 +11,6 @@ from pathlib import Path
 
 import httpx
 
-# ── Model identifiers ─────────────────────────────────────────────────────────
 BACKBONES = {
     "haiku": {
         "model":    "claude-haiku-3-5-20251001",
@@ -57,15 +28,14 @@ BACKBONES = {
     },
 }
 
-JUDGE_MODEL = "gpt-4o-mini"   # always GPT-4o-mini for consistency with Exp B
+JUDGE_MODEL = "gpt-4o-mini"
 SYSTEMS     = ["sbus", "langgraph", "crewai"]
 N_VALUES    = [4, 8, 16]
-N_RUNS      = 3               # 3 runs per (task, system, N) = same as Exp B
+N_RUNS      = 3
 N_STEPS     = 50
 SBUS_URL    = os.getenv("SBUS_URL", "http://localhost:7000")
 
 def load_tasks(tasks_path: str) -> list[dict]:
-    """Load from your existing tasks_30_multidomain.json dataset."""
     if not Path(tasks_path).exists():
         return [
             {"task_id": f"astropy__astropy-{tid}", "domain": "astropy"}
@@ -85,7 +55,6 @@ def load_tasks(tasks_path: str) -> list[dict]:
 
 async def llm_call(messages: list, model: str, base_url: str,
                    api_key: str, max_tokens: int = 200) -> tuple[str, int, int]:
-    """Returns (text, input_tokens, output_tokens)."""
     import openai
     client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
     resp = await client.chat.completions.create(
@@ -98,7 +67,6 @@ async def llm_call(messages: list, model: str, base_url: str,
 async def run_sbus_agent(agent_id: str, task: dict, shard_key: str,
                          backbone: dict, sbus_url: str,
                          n_steps: int) -> dict:
-    """Run one S-Bus agent. Returns {coord_tokens, work_tokens, commits, conflicts}."""
     coord_tokens = 0
     work_tokens  = 0
     commits      = 0
@@ -125,7 +93,6 @@ async def run_sbus_agent(agent_id: str, task: dict, shard_key: str,
             except Exception as e:
                 delta = f"[error step {step}: {e}]"
 
-            # Commit
             ev = shard.get("version", 0)
             r2 = await http.post(f"{sbus_url}/commit/v2", json={
                 "key": shard_key, "expected_version": ev,
@@ -184,7 +151,6 @@ async def run_experiment(task: dict, system: str, n: int,
                 result["excluded"] = 1
                 return result
 
-        # Run N agents concurrently
         agent_tasks = [
             run_sbus_agent(f"agent_{i}_{run_id}", task, shard_key,
                            backbone, sbus_url, N_STEPS // n)
