@@ -4,22 +4,24 @@ __pycache__/
 .venv/
 venv/
 
-# Editors
 .vscode/
 .idea/
 *.swp
 .DS_Store
 
-# Results & data (too large for git, see Zenodo)
-results/
+results/*
+!results/.gitkeep
 *.csv
 *.json
 !shared_state_tasks.json
 !sjv4_tasks.json
 !tasks.json
 !datasets/tasks_30_multidomain.json
+!datasets/long_horizon_tasks.json
 *.log
 
-# Credentials
+.pytest_cache/
+.mypy_cache/
+
 .env
 credentials.json
