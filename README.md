@@ -6,7 +6,8 @@ This repository contains the experiment scripts, datasets, and analysis
 code that produce every empirical measurement reported in:
 
 > *S-Bus: Automatic Read-Set Reconstruction for Multi-Agent LLM State
-> Coordination.* Sajjad Khan, 2026. _arXiv ID forthcoming._
+> Coordination.* Sajjad Khan, 2026.
+> [📄 Paper PDF](./sbus.pdf) — _arXiv ID forthcoming._
 
 **Companion repositories:**
 
@@ -160,6 +161,7 @@ sbus-experiments/
 ├── pyproject.toml                  uv-managed dependency manifest
 ├── README.md                       this file
 ├── LICENSE                         MIT (code) + CC-BY-4.0 (datasets)
+├── sbus.pdf                        paper PDF
 │
 ├── agent.py                        Agent abstraction over OpenAI API
 ├── harness.py                      Shared experiment-harness primitives
@@ -292,12 +294,13 @@ each trial; the structural results are independent of LLM determinism.
 ## Citation
 
 ```bibtex
-@techreport{khan2026sbus,
-  author      = {Khan, Sajjad},
-  title       = {S-Bus: Automatic Read-Set Reconstruction for Multi-Agent
-                 LLM State Coordination},
-  year        = {2026},
-  note        = {waiting for arXiv endorsment...}
+@misc{khan2026sbus,
+  author       = {Khan, Sajjad},
+  title        = {{S-Bus}: Automatic Read-Set Reconstruction for Multi-Agent
+                  {LLM} State Coordination},
+  year         = {2026},
+  note         = {Preprint},
+  howpublished = {\url{https://github.com/sajjadanwar0/sbus}}
 }
 ```
 
