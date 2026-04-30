@@ -296,14 +296,10 @@ each trial; the structural results are independent of LLM determinism.
   author      = {Khan, Sajjad},
   title       = {S-Bus: Automatic Read-Set Reconstruction for Multi-Agent
                  LLM State Coordination},
-  institution = {Independent},
   year        = {2026},
-  note        = {arXiv preprint}
+  note        = {waiting for arXiv endorsment...}
 }
 ```
-
-_Once the arXiv ID is assigned, add `url = {https://arxiv.org/abs/XXXX.XXXXX}`
-and the eprint ID to the BibTeX above._
 
 ---
 
