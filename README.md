@@ -161,8 +161,6 @@ sbus-experiments/
 ├── pyproject.toml                  uv-managed dependency manifest
 ├── README.md                       this file
 ├── LICENSE                         MIT (code) + CC-BY-4.0 (datasets)
-├── sbus.pdf                        paper PDF
-│
 ├── agent.py                        Agent abstraction over OpenAI API
 ├── harness.py                      Shared experiment-harness primitives
 ├── domains.py                      Task-domain definitions
