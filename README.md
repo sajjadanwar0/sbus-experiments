@@ -7,7 +7,7 @@ code that produce every empirical measurement reported in:
 
 > *S-Bus: Automatic Read-Set Reconstruction for Multi-Agent LLM State
 > Coordination.* Sajjad Khan, 2026.
-> [Paper PDF](./sbus.pdf) — [arXiv:2605.17076](https://arxiv.org/abs/2605.17076) [cs.LG].
+> [arXiv:2605.17076](https://arxiv.org/abs/2605.17076) [cs.LG].
 
 **Companion repositories:**
 
@@ -15,7 +15,7 @@ code that produce every empirical measurement reported in:
   containing `sbus-server` (the measured system), `sbus-baselines`
   (PG and Redis adapters), and `sbus-proxy` (transparent LLM-API proxy)
 - [`sbus-formals`](https://github.com/sajjadanwar0/sbus-formals) —
-  TLA+, TLAPS, and Dafny mechanised proofs
+  TLA+, TLAPS, and Dafny mechanized proofs
 
 ---
 
