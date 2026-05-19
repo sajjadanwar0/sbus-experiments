@@ -7,7 +7,7 @@ code that produce every empirical measurement reported in:
 
 > *S-Bus: Automatic Read-Set Reconstruction for Multi-Agent LLM State
 > Coordination.* Sajjad Khan, 2026.
-> [Paper PDF](./sbus.pdf) — _arXiv ID forthcoming._
+> [Paper PDF](./sbus.pdf) — [arXiv:2605.17076](https://arxiv.org/abs/2605.17076) [cs.LG].
 
 **Companion repositories:**
 
@@ -19,7 +19,7 @@ code that produce every empirical measurement reported in:
 
 ---
 
-## Quickstart (≈ 2 min, no API keys)
+## Quickstart (≤ 2 min, no API keys)
 
 The cheapest sanity check verifies the cross-shard validation logic on
 the running server: stale commits should be rejected (HTTP 409), fresh
@@ -273,7 +273,7 @@ LLM-driven experiments are not bit-reproducible. Expect:
   deterministic given the ACP retry logic, version checks, and the
   server-side counters; they do not depend on LLM stochasticity.
 - **Approximate semantic results** — judge labels, content-quality
-  scores, and IAA estimates vary by ≈ 5 pp across runs at temperature 0,
+  scores, and IAA estimates vary by ≤ 5 pp across runs at temperature 0,
   more under higher temperatures. The shipped `results/*.csv` files
   are exact run records; fresh runs produce statistically equivalent
   but not bit-identical outputs.
@@ -295,12 +295,14 @@ each trial; the structural results are independent of LLM determinism.
 
 ```bibtex
 @misc{khan2026sbus,
-  author       = {Khan, Sajjad},
-  title        = {{S-Bus}: Automatic Read-Set Reconstruction for Multi-Agent
-                  {LLM} State Coordination},
-  year         = {2026},
-  note         = {Preprint},
-  howpublished = {\url{https://github.com/sajjadanwar0/sbus}}
+  author        = {Khan, Sajjad},
+  title         = {{S-Bus}: Automatic Read-Set Reconstruction for Multi-Agent
+                   {LLM} State Coordination},
+  year          = {2026},
+  eprint        = {2605.17076},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LG},
+  url           = {https://arxiv.org/abs/2605.17076}
 }
 ```
 
