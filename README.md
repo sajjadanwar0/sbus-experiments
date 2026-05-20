@@ -300,7 +300,8 @@ each trial; the structural results are independent of LLM determinism.
   eprint        = {2605.17076},
   archivePrefix = {arXiv},
   primaryClass  = {cs.LG},
-  url           = {https://arxiv.org/abs/2605.17076}
+  url           = {https://arxiv.org/abs/2605.17076},
+  note          = {Under review at The VLDB Journal}
 }
 ```
 
