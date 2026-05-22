@@ -61,6 +61,45 @@ outputs (see [Reproducibility](#reproducibility)).
 
 ---
 
+## PH-3 LLM-judge validation against a human annotator (v2 of preprint)
+
+The principal LLM judge (GPT-4o on the frozen three-step PH-3 rubric)
+was independently validated against a human annotator
+(**Zahid Hussain, Mindgigs Peshawar**) on the same 400-pair sample
+using the identical rubric.
+
+**Result:**
+- Strict κ = 0.93 (n = 93 unambiguous yes/no pairs, 96.8% raw agreement,
+  "almost perfect" on the Landis–Koch banding)
+- Lenient κ = 0.69 (n = 400 including `unclear`, "substantial" banding)
+- Confusion matrix (strict): `first/yes,human/yes = 33`,
+  `first/yes,human/no = 0`, `first/no,human/yes = 3`, `first/no,human/no = 57`
+- Human-annotator self-report over-claim rate: 49% (precision 0.514)
+- LLM-judge self-report over-claim rate: 32% (precision 0.681)
+
+The human annotator is the stricter annotator on the items both can
+label unambiguously. The LLM judge is therefore a sound proxy for the
+human on the PH-3 was-this-shard-used rubric; the SJ-v4 /
+Dedicated-Shard / Shared-State semantic-quality rubric is a distinct
+rubric still validated by LLM judge only (Limitation L5 in v2 of the
+paper).
+
+**Reproduce:**
+
+```bash
+uv run python score_annotations.py first.csv second_human_annotator.csv
+```
+
+**Files:**
+- `first.csv` — labels produced by the principal LLM judge (400 rows)
+- `second_human_annotator.csv` — labels produced by the human annotator (400 rows)
+- `score_annotations.py` — computes Cohen's kappa, confusion matrix,
+  and self-report-vs-annotator precision/recall between any two label
+  files (LLM-vs-LLM, LLM-vs-human, or human-vs-human; the annotator type
+  is determined by what produced the input CSVs, not by the script)
+
+---
+
 ## Running experiments
 
 Each script is standalone and supports `--help`. The three most
@@ -68,16 +107,16 @@ informative reproductions, in increasing order of cost:
 
 ```bash
 # 1. Structural-SCR dose-response — exact analytic match per Table XVIII
-#    ≈ 5 min, ≈ $0.50
+#    ~ 5 min, ~ $0.50
 uv run python exp_sjv5_parallel.py --tasks-limit 1
 
 # 2. Workload-B (cross-shard view-divergence on 8 domains)
-#    ≈ 30 min, ≈ $5
+#    ~ 30 min, ~ $5
 uv run python run_workload_b.py --domains all --trials 5
 uv run python analyze_workload_b.py results/workload_b_sweep.jsonl
 
 # 3. PROXY-PH2 cross-backbone trio
-#    ≈ 6 hours total, ≈ $50 across three vendors
+#    ~ 6 hours total, ~ $50 across three vendors
 uv run python exp_proxy_ph2.py               --output results/proxy_ph2_gpt.csv
 uv run python exp_proxy_ph2_haiku.py         --output results/proxy_ph2_haiku.csv
 uv run python exp_proxy_ph2_multibackbone.py --output results/proxy_ph2_gemini.csv
@@ -86,7 +125,7 @@ uv run python exp_proxy_ph2_multibackbone.py --output results/proxy_ph2_gemini.c
 The convenience drivers `run_proxy_ph2.sh` and `run_vocab_scaling.sh`
 wrap multi-cell parameter sweeps. See per-script `--help` for full
 options. The largest individual run is `exp_proxy_ph2.py --full`
-(≈ 2 hours, ≈ $30 on GPT-4o-mini).
+(~ 2 hours, ~ $30 on GPT-4o-mini).
 
 For the PG-Comparison sweep, the Rust adapters from the `sbus`
 repository must be running on ports 7001 (PG) and 7002 (Redis); see
@@ -176,6 +215,10 @@ sbus-experiments/
 ├── tasks.json                      400-row evaluation task pool
 ├── sjv4_tasks.json                 Tasks for Exp. SJ-V4
 ├── shared_state_tasks.json         Tasks for Exp. Shared-State
+├── first.csv                       LLM-judge labels (PH-3 validation, 400 rows)
+├── second_human_annotator.csv      Human-annotator labels (PH-3 validation, 400 rows)
+├── score_annotations.py            Cohen's kappa and self-report scorer
+│
 ├── datasets/
 │   ├── tasks_30_multidomain.json   30 tasks across 4 domains (Exp. SJ-V3)
 │   └── long_horizon_tasks.json     15-task long-horizon-planning bench (Exp. B)
@@ -194,6 +237,8 @@ sbus-experiments/
 | `tasks.json` | `run_llm_judges.py` | 400 | CC-BY-4.0 |
 | `sjv4_tasks.json` | `exp_semantic_judge_v4.py` | 20 | CC-BY-4.0 |
 | `shared_state_tasks.json` | `exp_shared_state.py` | 30 | CC-BY-4.0 |
+| `first.csv` | `score_annotations.py` (PH-3 validation) | 400 | CC-BY-4.0 |
+| `second_human_annotator.csv` | `score_annotations.py` (PH-3 validation) | 400 | CC-BY-4.0 |
 | `datasets/tasks_30_multidomain.json` | `run_sjv3_parallel.py` | 30 | CC-BY-4.0 |
 | `datasets/long_horizon_tasks.json` | `sdk_compare_v2.py` | 15 | CC-BY-4.0 |
 
@@ -221,7 +266,8 @@ paper to the script(s) that produce it._
 |---|---|
 | Exp. PH-2 (`p_hidden = 0.739`) | `measure_phidden_v2.py` (legacy mode) |
 | Exp. PH-3 (semantic extraction, recall/precision) | `measure_phidden_v2.py` (PH-3 mode) |
-| Exp. PH-3 validation (κ = 0.46, 2 LLM judges) | `run_llm_judges.py`, `score_annotations.py`, `diagnose_disagreements.py` |
+| Exp. PH-3 inter-LLM-judge validation (κ=0.46, GPT-4o vs Claude Sonnet 4.6) | `run_llm_judges.py`, `diagnose_disagreements.py` |
+| Exp. PH-3 LLM-vs-human-annotator validation (κ=0.93 strict, n=93) | `score_annotations.py`, `first.csv`, `second_human_annotator.csv` |
 | Exp. Adversarial-Rhidden | `exp_adversarial_rhidden_v2.py` |
 | Exp. PROXY-PH2 (structural-coverage decomposition) | `exp_proxy_ph2.py` |
 | Exp. PROXY-PH2 cross-backbone (Anthropic Haiku 4.5) | `exp_proxy_ph2_haiku.py` |
@@ -271,7 +317,7 @@ LLM-driven experiments are not bit-reproducible. Expect:
   deterministic given the ACP retry logic, version checks, and the
   server-side counters; they do not depend on LLM stochasticity.
 - **Approximate semantic results** — judge labels, content-quality
-  scores, and IAA estimates vary by ≤ 5 pp across runs at temperature 0,
+  scores, and IAA estimates vary by ≈ 5 pp across runs at temperature 0,
   more under higher temperatures. The shipped `results/*.csv` files
   are exact run records; fresh runs produce statistically equivalent
   but not bit-identical outputs.
@@ -286,6 +332,10 @@ The Workload-B experiment relies on the server-side
 `GET /stats` and the runtime ORI toggle at `POST /admin/config` (both
 in `sbus-server`). The harness reads these counters at the end of
 each trial; the structural results are independent of LLM determinism.
+
+The PH-3 LLM-vs-human-annotator validation (`first.csv`,
+`second_human_annotator.csv`, `score_annotations.py`) is bit-reproducible:
+the CSVs are static and the kappa computation is deterministic.
 
 ---
 
@@ -310,5 +360,5 @@ each trial; the structural results are independent of LLM determinism.
 ## License
 
 - Code: MIT (see `LICENSE`).
-- Datasets in `datasets/` and the four top-level `*_tasks.json` files:
-  CC-BY-4.0.
+- Datasets in `datasets/` and the top-level `*_tasks.json`, `first.csv`,
+  and `second_human_annotator.csv` files: CC-BY-4.0.
