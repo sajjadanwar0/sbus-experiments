@@ -1,3 +1,18 @@
+"""
+Computes Cohen's kappa and self-report consistency between two label files.
+
+The two label files can be any combination of annotators: LLM-vs-LLM,
+LLM-vs-human, or human-vs-human. Each CSV must have columns:
+    row_idx, candidate_shard, human_label (or llm_label), agent_said_used_it
+
+The "label" column can be either 'human_label' or 'llm_label'; both are read.
+The kappa computation does not depend on which annotator type produced the
+labels --- it measures agreement between whatever pair of label files
+is passed on the command line.
+
+Usage:
+    python3 score_annotations.py judge_a.csv judge_b.csv
+"""
 import csv
 import sys
 
@@ -69,7 +84,7 @@ def confusion_matrix(labels_a, labels_b, classes, label_a="A", label_b="B"):
         print()
 
 
-def self_report_vs_labels(path_csv, judge_label):
+def self_report_vs_labels(path_csv, annotator_label):
     claim = agent_claim(path_csv)
     labels = load_labels(path_csv)
     keys = [k for k in claim if k in labels and labels[k] in ("yes", "no")]
@@ -81,7 +96,7 @@ def self_report_vs_labels(path_csv, judge_label):
     if total == 0:
         return None
     return {
-        "judge": judge_label,
+        "annotator": annotator_label,
         "tp": tp, "fp": fp, "fn": fn, "tn": tn,
         "precision": tp / (tp + fp) if (tp + fp) else 0.0,
         "recall":    tp / (tp + fn) if (tp + fn) else 0.0,
@@ -90,19 +105,19 @@ def self_report_vs_labels(path_csv, judge_label):
     }
 
 
-def judge_name_from_path(path):
+def annotator_name_from_path(path):
     base = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
     return base.replace("_labels", "").replace("_", "-")
 
 
 def main():
     if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} judge_a_labels.csv judge_b_labels.csv")
+        print(f"Usage: {sys.argv[0]} annotator_a.csv annotator_b.csv")
         sys.exit(1)
 
     path_a, path_b = sys.argv[1], sys.argv[2]
-    name_a = judge_name_from_path(path_a)
-    name_b = judge_name_from_path(path_b)
+    name_a = annotator_name_from_path(path_a)
+    name_b = annotator_name_from_path(path_b)
 
     labels_a = load_labels(path_a)
     labels_b = load_labels(path_b)
@@ -119,12 +134,12 @@ def main():
     agree_strict = sum(1 for k in keys_strict if labels_a[k] == labels_b[k])
 
     print("=" * 64)
-    print("Inter-LLM agreement report")
+    print("Inter-annotator agreement report")
     print("=" * 64)
-    print(f"Judge A: {name_a}   ({path_a})")
-    print(f"Judge B: {name_b}   ({path_b})")
+    print(f"Annotator A: {name_a}   ({path_a})")
+    print(f"Annotator B: {name_b}   ({path_b})")
     print()
-    print("Pairs labelled by both judges:")
+    print("Pairs labelled by both annotators:")
     print(f"  yes/no only (strict):  {n_strict}")
     print(f"  including unclear:     {n_lenient}")
     print()
@@ -144,8 +159,12 @@ def main():
     print("  <0.00 poor | 0.00-0.20 slight | 0.21-0.40 fair")
     print("  0.41-0.60 moderate | 0.61-0.80 substantial | 0.81-1.00 almost perfect")
     print()
-    print("NOTE: This is inter-LLM agreement, not human IAA. The kappa")
-    print("measures consistency between two LLM judges, not correctness.")
+    print("NOTE: Cohen's kappa measures inter-annotator agreement. The")
+    print("annotator type (LLM or human) is determined by what produced")
+    print("the input CSVs, not by this script. When one of the input")
+    print("files contains human-produced labels, kappa is an LLM-vs-human")
+    print("(or human-vs-human) agreement; when both are LLM-produced,")
+    print("it is an inter-LLM agreement.")
     print()
 
     print("Confusion matrix (strict, yes/no only):")
@@ -154,18 +173,18 @@ def main():
     print()
 
     print("=" * 64)
-    print("Self-report vs LLM-judge (weak validation)")
+    print("Self-report vs annotator labels (weak validation)")
     print("=" * 64)
     for path in (path_a, path_b):
-        r = self_report_vs_labels(path, judge_name_from_path(path))
+        r = self_report_vs_labels(path, annotator_name_from_path(path))
         if r is None:
             print(f"{path}: insufficient data")
             continue
-        print(f"{r['judge']} (n={r['n']}):")
+        print(f"{r['annotator']} (n={r['n']}):")
         print(f"  self-report precision: {r['precision']:.3f}  "
-              f"(when agent says 'used', how often does judge agree?)")
+              f"(when agent says 'used', how often does this annotator agree?)")
         print(f"  self-report recall:    {r['recall']:.3f}  "
-              f"(of judge-marked 'used', how many did agent self-report?)")
+              f"(of annotator-marked 'used', how many did agent self-report?)")
         print(f"  self-report accuracy:  {r['accuracy']:.3f}")
         print(f"    TP={r['tp']}  FP={r['fp']}  FN={r['fn']}  TN={r['tn']}")
         print()
